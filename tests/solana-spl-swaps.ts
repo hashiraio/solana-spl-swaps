@@ -16,8 +16,8 @@ const MILLIS_PER_SLOT = 400;
 describe("Testing one way swap between Alice and Bob", () => {
     const swapAmount = new anchor.BN(10);
     const swapExpiresIn = 1000 / MILLIS_PER_SLOT; // 1 second
-    const secret: Uint8Array = crypto.randomBytes(32);
-    const secretHash = [...crypto.createHash('sha256').update(secret).digest()];
+    const secret: Buffer = crypto.randomBytes(32);
+    const secretHash: Buffer = crypto.createHash('sha256').update(secret).digest();
 
     let mint: web3.PublicKey;  // A random mint for the test
     const mintAuthority = new web3.Keypair();  // And a random authority for it
@@ -29,15 +29,15 @@ describe("Testing one way swap between Alice and Bob", () => {
     const alicePubkey = alice.publicKey;  // Alice's Solan address
     let aliceWallet: web3.PublicKey;      // Alice's Token Wallet
 
-    const swapIdPreImage = Buffer.from([...alicePubkey.toBytes(), ...secretHash]);
-    const swapId = [...crypto.createHash('sha256').update(swapIdPreImage).digest()];
+    const swapIdPreImage = Buffer.concat([alicePubkey.toBuffer(), secretHash]);
+    const swapId = crypto.createHash('sha256').update(swapIdPreImage).digest();
     // Bob's stuff
     const bob = new web3.Keypair();       // Bob's Solana Keypair
     const bobPubkey = bob.publicKey;      // Bob's Solana Address
     let bobWallet: web3.PublicKey;        // Bob's Token Wallet
 
     // Deriving PDAs, just for logging and test verification
-    const pdaSeeds = (phrase: string) => [Buffer.from(phrase), alicePubkey.toBuffer(), Buffer.from(secretHash)];
+    const pdaSeeds = (phrase: string) => [Buffer.from(phrase), swapId];
     const [swapAccount,] = web3.PublicKey.findProgramAddressSync(pdaSeeds("swap_account"), program.programId);
     const [swapWallet,] = web3.PublicKey.findProgramAddressSync(pdaSeeds("swap_wallet"), program.programId);
 
@@ -68,7 +68,8 @@ describe("Testing one way swap between Alice and Bob", () => {
     });
 
     async function aliceInitiate() {
-        await program.methods.initiate(secretHash, swapId, bobWallet, swapAmount, swapExpiresIn)
+        await program.methods
+            .initiate([...swapId], [...secretHash], bobWallet, swapAmount, swapExpiresIn)
             .accounts({
                 initiator: alicePubkey,
                 initiatorWallet: aliceWallet,

@@ -15,8 +15,8 @@ pub mod solana_spl_swaps {
 
     pub fn initiate(
         ctx: Context<Initiate>,
-        secret_hash: [u8; 32],
         swap_id: [u8; 32],
+        secret_hash: [u8; 32],
         redeemer_wallet: Pubkey,
         amount: Lamports,
         expires_in: Slots,
@@ -70,11 +70,9 @@ pub mod solana_spl_swaps {
 
         require!(hash::hash(&secret).as_ref() == &secret_hash, SwapError::InvalidSecret);
 
-        let initiator_key = initiator.key();
         let pda_seeds: &[&[&[u8]]] = &[&[
             b"swap_account",
-            initiator_key.as_ref(),
-            &secret_hash,
+            &swap_id,
             &[bump],
         ]];
         // Transfer the tokens to the redeemer
@@ -116,12 +114,12 @@ pub struct SwapAccount {
 }
 
 #[derive(Accounts)]
-#[instruction(secret_hash: [u8; 32])]
+#[instruction(swap_id: [u8; 32])]
 pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_account", initiator.key().as_ref(), &secret_hash],
+        seeds = [b"swap_account".as_ref(), &swap_id],
         bump,
         space = 8 + std::mem::size_of::<SwapAccount>(),
     )]
@@ -130,7 +128,7 @@ pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_wallet", initiator.key().as_ref(), &secret_hash],
+        seeds = [b"swap_wallet".as_ref(), &swap_id],
         bump,
         token::mint = mint,
         token::authority = swap_account,
