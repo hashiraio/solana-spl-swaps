@@ -11,11 +11,12 @@ import { SolanaSplSwaps } from "../target/types/solana_spl_swaps";
 anchor.setProvider(anchor.AnchorProvider.env());
 const connection = anchor.getProvider().connection;
 const program = anchor.workspace.SolanaSplSwaps as Program<SolanaSplSwaps>;
-const MILLIS_PER_SLOT = 400;
 
 describe("Testing one way swap between Alice and Bob", () => {
     const swapAmount = new anchor.BN(10);
-    const swapExpiresIn = 1000 / MILLIS_PER_SLOT; // 1 second
+    const expiryMs = 1000;
+    // Expiry must be provided in Slot units where 1 slot = 400 ms
+    const swapExpiresIn = expiryMs / 400;
     const secret: Buffer = crypto.randomBytes(32);
     const secretHash: Buffer = crypto.createHash('sha256').update(secret).digest();
 
@@ -89,13 +90,37 @@ describe("Testing one way swap between Alice and Bob", () => {
     });
 
     it("Test redeem", async () => {
-        console.log("\tRedeem:  ", await program.methods.redeem([...secret])
+        // The previous testcase has initiated the swap
+        await program.methods.redeem([...secret])
         .accounts({
             swapAccount,
             swapWallet,
             redeemerWallet: bobWallet,
             initiator: alicePubkey,
-        })
-        .rpc());
-    })
+        }).rpc().then(async signature => {
+            console.log("\tRedeem:  ", signature);
+            await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
+        });
+        const bobBalance = (await connection.getTokenAccountBalance(bobWallet)).value.amount;
+        expect(bobBalance).to.equal(swapAmount.toString());
+    });
+
+    it("Test refund", async () => {
+        await aliceInitiate();  // Re-initiating for this test
+        console.log(`Awaiting timelock of ${expiryMs} for Refund`);
+        await new Promise(r => setTimeout(r, expiryMs + 400));
+        await program.methods.refund()
+        .accounts({
+            swapAccount,
+            swapWallet,
+            initiator: alicePubkey,
+            initiatorWallet: aliceWallet,
+        }).rpc().then(async signature => {
+            console.log("\tRefund:  ", signature);
+            await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) });
+        });
+        // Alice had a token balance of 80 (-10 from above init(), -10 from previous swap)
+        const aliceBalance = (await connection.getTokenAccountBalance(aliceWallet)).value.amount;
+        expect(aliceBalance).to.equal('90');  // Successful redeem adds +10 making it 90
+    });
 });

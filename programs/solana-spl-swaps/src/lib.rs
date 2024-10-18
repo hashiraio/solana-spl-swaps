@@ -70,11 +70,7 @@ pub mod solana_spl_swaps {
 
         require!(hash::hash(&secret).as_ref() == &secret_hash, SwapError::InvalidSecret);
 
-        let pda_seeds: &[&[&[u8]]] = &[&[
-            b"swap_account",
-            &swap_id,
-            &[bump],
-        ]];
+        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump] ]];
         // Transfer the tokens to the redeemer
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
@@ -100,6 +96,42 @@ pub mod solana_spl_swaps {
 
         Ok(())
     }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        let Refund {
+            token_program,
+            swap_account,
+            swap_wallet,
+            initiator,
+            initiator_wallet,
+            ..
+        } = ctx.accounts;
+        let SwapAccount { expiry_slot, swap_id, amount, bump, .. } = **swap_account;
+        require!(Clock::get()?.slot >= expiry_slot, SwapError::RefundBeforeExpiry);
+        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump] ]];
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::Transfer {
+                from: swap_wallet.to_account_info(),
+                to: initiator_wallet.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }
+        ).with_signer(pda_seeds);
+        token::transfer(cpi_context, amount)?;
+        emit!(Refunded { swap_id });
+
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::CloseAccount {
+                account: swap_wallet.to_account_info(),
+                destination: initiator.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }
+        ).with_signer(pda_seeds);
+        token::close_account(cpi_context)?;
+
+        Ok(())
+    }
 }
 
 #[account]
@@ -110,7 +142,7 @@ pub struct SwapAccount {
     secret_hash: [u8; 32],
     expiry_slot: u64,
     amount: Lamports,
-    bump: u8,
+    bump: u8,  // Used for pda_seeds in refund & redeem
 }
 
 #[derive(Accounts)]
@@ -161,9 +193,27 @@ pub struct Redeem<'info> {
     #[account(mut, address = swap_account.redeemer_wallet @ SwapError::InvalidRedeemer)]
     pub redeemer_wallet: Account<'info, TokenAccount>,
 
-    /// CHECK: Initiator's address for refunding PDA creation fees
+    /// CHECK: Initiator's address for refunding PDA rent amounts
     #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
     pub initiator: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct Refund<'info> {
+    #[account(mut, close = initiator)]
+    pub swap_account: Account<'info, SwapAccount>,
+
+    #[account(mut, token::authority = swap_account)]
+    pub swap_wallet: Account<'info, TokenAccount>,
+
+    /// CHECK: Initiator's address for refunding PDA rent amounts
+    #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
+    pub initiator: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub initiator_wallet: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
 }
@@ -178,6 +228,10 @@ pub struct Initiated {
 pub struct Redeemed {
     swap_id: [u8; 32],
     secret: [u8; 32],
+}
+#[event]
+pub struct Refunded {
+    swap_id: [u8; 32],
 }
 
 #[error_code]
