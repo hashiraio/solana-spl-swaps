@@ -71,7 +71,7 @@ pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_account".as_ref(), initiator.key().as_ref(), secret_hash.as_ref()],
+        seeds = [b"swap_account", initiator.key().as_ref(), &secret_hash],
         bump,
         space = 8 + std::mem::size_of::<SwapAccount>(),
     )]
@@ -80,7 +80,7 @@ pub struct Initiate<'info> {
     #[account(
         init,
         payer = initiator,
-        seeds = [b"swap_wallet".as_ref(), initiator.key().as_ref(), secret_hash.as_ref()],
+        seeds = [b"swap_wallet", initiator.key().as_ref(), &secret_hash],
         bump,
         token::mint = mint,
         token::authority = swap_account,
