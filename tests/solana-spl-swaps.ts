@@ -58,10 +58,10 @@ describe("Testing one way swap between Alice and Bob", () => {
             );
         console.log(
             `Account Information:
-    Alice: \t${alicePubkey}\t Alice TokenWallet: \t${aliceWallet}
-    Bob: \t${bobPubkey}\t Bob TokenWallet: \t${bobWallet}
-    Swap Acc: \t${swapAccount}\t Swap Wallet: \t\t${swapWallet}
-    Mint: \t${mint}\t Mint Authority: \t${mintAuthorityPubkey}\n`
+\tAlice:    ${alicePubkey} \t Alice TokenWallet: \t${aliceWallet}
+\tBob:      ${bobPubkey} \t Bob TokenWallet: \t${bobWallet}
+\tSwap Acc: ${swapAccount} \t Swap Wallet: \t\t${swapWallet}
+\tMint:     ${mint}\t Mint Authority: \t${mintAuthorityPubkey}\n`
         );
     });
 
@@ -74,7 +74,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             })
             .signers([alice]).rpc()
             .then(async signature => {
-                console.log("Alice initiated with Signature:", signature);
+                console.log(`\tInitiate: ${signature}`);
                 await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
             });
     }
@@ -86,7 +86,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     });
 
     it("Test redeem", async () => {
-        console.log("Redeem: ", await program.methods.redeem([...secret])
+        console.log("\tRedeem:  ", await program.methods.redeem([...secret])
         .accounts({
             swapAccount,
             swapWallet,
