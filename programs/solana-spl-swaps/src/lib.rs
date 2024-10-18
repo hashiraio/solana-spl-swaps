@@ -37,6 +37,7 @@ pub mod solana_spl_swaps {
             secret_hash,
             expiry_slot: Clock::get()?.slot + expires_in as u64,
             amount,
+            bump: ctx.bumps.swap_account,
         };
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
@@ -61,6 +62,7 @@ pub struct SwapAccount {
     secret_hash: [u8; 32],
     expiry_slot: u64,
     amount: Lamports,
+    bump: u8,
 }
 
 #[derive(Accounts)]
