@@ -52,6 +52,58 @@ pub mod solana_spl_swaps {
         
         Ok(())
     }
+
+    pub fn redeem(ctx: Context<Redeem>, secret: [u8; 32]) -> Result<()> {
+        let Redeem {
+            swap_wallet,
+            swap_account,
+            initiator,
+            redeemer_wallet,
+            token_program,
+            ..
+         } = ctx.accounts;
+        let SwapAccount {
+            swap_id,
+            secret_hash,
+            bump,
+            amount,
+            ..
+        } = **swap_account;
+
+        require!(hash::hash(&secret).as_ref() == &secret_hash, SwapError::InvalidSecret);
+
+        let initiator_key = initiator.key();
+        let pda_seeds: &[&[&[u8]]] = &[&[
+            b"swap_account",
+            initiator_key.as_ref(),
+            &secret_hash,
+            &[bump],
+        ]];
+        // Transfer the tokens to the redeemer
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::Transfer {
+                from: swap_wallet.to_account_info(),
+                to: redeemer_wallet.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }
+        ).with_signer(pda_seeds);
+        token::transfer(cpi_context, amount)?;
+
+        emit!(Redeemed { swap_id, secret });
+        // Close the swap wallet (returns rent lamports to initiator)
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::CloseAccount {
+                account: swap_wallet.to_account_info(),
+                destination: initiator.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }
+        ).with_signer(pda_seeds);
+        token::close_account(cpi_context)?;
+
+        Ok(())
+    }
 }
 
 #[account]
@@ -102,9 +154,47 @@ pub struct Initiate<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct Redeem<'info> {
+    #[account(mut, close = initiator)]
+    pub swap_account: Account<'info, SwapAccount>,
+
+    #[account(mut, token::authority = swap_account)]
+    pub swap_wallet: Account<'info, TokenAccount>,
+
+    #[account(mut, address = swap_account.redeemer_wallet @ SwapError::InvalidRedeemer)]
+    pub redeemer_wallet: Account<'info, TokenAccount>,
+
+    /// CHECK: Initiator's address for refunding PDA creation fees
+    #[account(mut, address = swap_account.initiator @ SwapError::InvalidRefundee)]
+    pub initiator: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 #[event]
 pub struct Initiated {
     swap_id: [u8; 32],
     secret_hash: [u8; 32],
     amount: u64,
+}
+#[event]
+pub struct Redeemed {
+    swap_id: [u8; 32],
+    secret: [u8; 32],
+}
+
+#[error_code]
+pub enum SwapError {
+    #[msg("The provided redeemer is not the intended recipient of the swap amount")]
+    InvalidRedeemer,
+
+    #[msg("The provided initiator/refundee is not the original initiator of the given swap account")]
+    InvalidRefundee,
+
+    #[msg("The provided secret does not correspond to the secret hash in the swap account")]
+    InvalidSecret,
+
+    #[msg("Attempt to perform a refund before expiry time")]
+    RefundBeforeExpiry,
 }

@@ -84,4 +84,15 @@ describe("Testing one way swap between Alice and Bob", () => {
         const swapWalletBalance = (await connection.getTokenAccountBalance(swapWallet)).value.amount;
         expect(swapWalletBalance).to.equal(swapAmount.toString());
     });
+
+    it("Test redeem", async () => {
+        console.log("Redeem: ", await program.methods.redeem([...secret])
+        .accounts({
+            swapAccount,
+            swapWallet,
+            redeemerWallet: bobWallet,
+            initiator: alicePubkey,
+        })
+        .rpc());
+    })
 });
