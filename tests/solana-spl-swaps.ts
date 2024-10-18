@@ -66,7 +66,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     });
 
     async function aliceInitiate() {
-        await program.methods.initiate(secretHash, bobPubkey, swapAmount, swapExpiresIn)
+        await program.methods.initiate(secretHash, bobWallet, swapAmount, swapExpiresIn)
             .accounts({
                 initiator: alicePubkey,
                 initiatorWallet: aliceWallet,

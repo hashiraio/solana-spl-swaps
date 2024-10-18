@@ -16,7 +16,7 @@ pub mod solana_spl_swaps {
     pub fn initiate(
         ctx: Context<Initiate>,
         secret_hash: [u8; 32],
-        redeemer: Pubkey,
+        redeemer_wallet: Pubkey,
         amount: Lamports,
         expires_in: Slots,
     ) -> Result<()> {
@@ -33,7 +33,7 @@ pub mod solana_spl_swaps {
         *ctx.accounts.swap_account = SwapAccount {
             swap_id,
             initiator: initiator.key(),
-            redeemer,
+            redeemer_wallet,
             secret_hash,
             expiry_slot: Clock::get()?.slot + expires_in as u64,
             amount,
@@ -57,7 +57,7 @@ pub mod solana_spl_swaps {
 pub struct SwapAccount {
     swap_id: [u8; 32],
     initiator: Pubkey,
-    redeemer: Pubkey,
+    redeemer_wallet: Pubkey, // Redeemer's token wallet
     secret_hash: [u8; 32],
     expiry_slot: u64,
     amount: Lamports,
