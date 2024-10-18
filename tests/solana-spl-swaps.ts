@@ -29,6 +29,8 @@ describe("Testing one way swap between Alice and Bob", () => {
     const alicePubkey = alice.publicKey;  // Alice's Solan address
     let aliceWallet: web3.PublicKey;      // Alice's Token Wallet
 
+    const swapIdPreImage = Buffer.from([...alicePubkey.toBytes(), ...secretHash]);
+    const swapId = [...crypto.createHash('sha256').update(swapIdPreImage).digest()];
     // Bob's stuff
     const bob = new web3.Keypair();       // Bob's Solana Keypair
     const bobPubkey = bob.publicKey;      // Bob's Solana Address
@@ -66,7 +68,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     });
 
     async function aliceInitiate() {
-        await program.methods.initiate(secretHash, bobWallet, swapAmount, swapExpiresIn)
+        await program.methods.initiate(secretHash, swapId, bobWallet, swapAmount, swapExpiresIn)
             .accounts({
                 initiator: alicePubkey,
                 initiatorWallet: aliceWallet,

@@ -16,6 +16,7 @@ pub mod solana_spl_swaps {
     pub fn initiate(
         ctx: Context<Initiate>,
         secret_hash: [u8; 32],
+        swap_id: [u8; 32],
         redeemer_wallet: Pubkey,
         amount: Lamports,
         expires_in: Slots,
@@ -27,9 +28,6 @@ pub mod solana_spl_swaps {
             token_program,
             ..
         } = ctx.accounts;
-        let swap_id = hash::hash(
-            &[initiator.key().as_ref(), &secret_hash].concat()
-        ).to_bytes();
         *ctx.accounts.swap_account = SwapAccount {
             swap_id,
             initiator: initiator.key(),
