@@ -47,7 +47,7 @@ pub mod solana_spl_swaps {
         );
         token::transfer(cpi_context, amount)?;
         emit!(Initiated { swap_id, secret_hash, amount });
-        
+
         Ok(())
     }
 
@@ -128,6 +128,43 @@ pub mod solana_spl_swaps {
                 authority: swap_account.to_account_info(),
             }
         ).with_signer(pda_seeds);
+        token::close_account(cpi_context)?;
+
+        Ok(())
+    }
+
+    pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
+        let InstantRefund {
+            token_program,
+            swap_account,
+            swap_wallet,
+            initiator,
+            initiator_wallet,
+            ..
+        } = ctx.accounts;
+        let SwapAccount { swap_id, amount, bump, .. } = **swap_account;
+
+        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump]]];
+
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::Transfer {
+                from: swap_wallet.to_account_info(),
+                to: initiator_wallet.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }).with_signer(pda_seeds);
+        token::transfer(cpi_context, amount)?;
+
+        emit!(InstantRefunded { swap_id });
+
+        // Close the wallet, refunding rent lamports to initiator
+        let cpi_context = CpiContext::new(
+            token_program.to_account_info(),
+            token::CloseAccount {
+                account: swap_wallet.to_account_info(),
+                destination: initiator.to_account_info(),
+                authority: swap_account.to_account_info(),
+            }).with_signer(pda_seeds);
         token::close_account(cpi_context)?;
 
         Ok(())
@@ -218,6 +255,35 @@ pub struct Refund<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct InstantRefund<'info> {
+    #[account(mut, close = initiator)]
+    pub swap_account: Account<'info, SwapAccount>,
+
+    #[account(mut, token::authority = swap_account)]
+    pub swap_wallet: Account<'info, TokenAccount>,
+
+    /// CHECK: Initiator's address for PDA rent refund and signature verification
+    #[account(mut)]
+    pub initiator: Signer<'info>,
+
+    #[account(mut, token::authority = initiator)]
+    pub initiator_wallet: Account<'info, TokenAccount>,
+
+    /// CHECK: Redeemer's address for signature verification
+    #[account(mut)]
+    pub redeemer: Signer<'info>,
+
+    #[account(
+        mut,
+        token::authority = redeemer,
+        address = swap_account.redeemer_wallet @ SwapError::InvalidRedeemer,
+    )]
+    pub redeemer_wallet: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 #[event]
 pub struct Initiated {
     swap_id: [u8; 32],
@@ -231,6 +297,10 @@ pub struct Redeemed {
 }
 #[event]
 pub struct Refunded {
+    swap_id: [u8; 32],
+}
+#[event]
+pub struct InstantRefunded {
     swap_id: [u8; 32],
 }
 

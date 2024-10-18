@@ -123,4 +123,24 @@ describe("Testing one way swap between Alice and Bob", () => {
         const aliceBalance = (await connection.getTokenAccountBalance(aliceWallet)).value.amount;
         expect(aliceBalance).to.equal('90');  // Successful redeem adds +10 making it 90
     });
+
+    it("Test instant refund", async () => {
+        await aliceInitiate();  // Re-initiating for this test
+        await program.methods.instantRefund()
+        .accounts({
+            swapAccount,
+            swapWallet,
+            initiator: alicePubkey,
+            initiatorWallet: aliceWallet,
+            redeemer: bobPubkey,
+            redeemerWallet: bobWallet,
+        }).signers([alice, bob])
+        .rpc().then(async signature => {
+            console.log("\tInstant Refund:  ", signature);
+            await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) });
+        });
+        // Alice had a token balance of 80 (-10 from above init(), -10 from previous swap)
+        const aliceBalance = (await connection.getTokenAccountBalance(aliceWallet)).value.amount;
+        expect(aliceBalance).to.equal('90');  // Successful redeem adds +10 making it 90
+    });
 });
