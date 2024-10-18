@@ -78,7 +78,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             })
             .signers([alice]).rpc()
             .then(async signature => {
-                console.log(`\tInitiate: ${signature}`);
+                console.log(`\tInitiate: \t${signature}`);
                 await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
             });
     }
@@ -98,7 +98,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             redeemerWallet: bobWallet,
             initiator: alicePubkey,
         }).rpc().then(async signature => {
-            console.log("\tRedeem:  ", signature);
+            console.log(`\tRedeem: \t${signature}`);
             await connection.confirmTransaction({signature, ...(await connection.getLatestBlockhash())});
         });
         const bobBalance = (await connection.getTokenAccountBalance(bobWallet)).value.amount;
@@ -116,7 +116,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             initiator: alicePubkey,
             initiatorWallet: aliceWallet,
         }).rpc().then(async signature => {
-            console.log("\tRefund:  ", signature);
+            console.log(`\tRefund: \t${signature}`);
             await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) });
         });
         // Alice had a token balance of 80 (-10 from above init(), -10 from previous swap)
@@ -136,7 +136,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             redeemerWallet: bobWallet,
         }).signers([alice, bob])
         .rpc().then(async signature => {
-            console.log("\tInstant Refund:  ", signature);
+            console.log(`\tInstant Refund:  ${signature}`);
             await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) });
         });
         // Alice had a token balance of 80 (-10 from above init(), -10 from previous swap)

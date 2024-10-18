@@ -107,7 +107,9 @@ pub mod solana_spl_swaps {
             ..
         } = ctx.accounts;
         let SwapAccount { expiry_slot, swap_id, amount, bump, .. } = **swap_account;
+
         require!(Clock::get()?.slot >= expiry_slot, SwapError::RefundBeforeExpiry);
+
         let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump] ]];
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
@@ -118,6 +120,7 @@ pub mod solana_spl_swaps {
             }
         ).with_signer(pda_seeds);
         token::transfer(cpi_context, amount)?;
+
         emit!(Refunded { swap_id });
 
         let cpi_context = CpiContext::new(
