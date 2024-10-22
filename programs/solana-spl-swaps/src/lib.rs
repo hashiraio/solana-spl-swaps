@@ -16,8 +16,8 @@ pub mod solana_spl_swaps {
     pub fn initiate(
         ctx: Context<Initiate>,
         swap_id: [u8; 32],
-        secret_hash: [u8; 32],
         redeemer_wallet: Pubkey,
+        secret_hash: [u8; 32],
         amount: Lamports,
         expires_in: Slots,
     ) -> Result<()> {
