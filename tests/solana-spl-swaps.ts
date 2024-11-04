@@ -134,7 +134,7 @@ describe("Testing one way swap between Alice and Bob", () => {
             initiatorWallet: aliceWallet,
             redeemer: bobPubkey,
             redeemerWallet: bobWallet,
-        }).signers([alice, bob])
+        }).signers([bob])
         .rpc().then(async signature => {
             console.log(`\tInstant Refund:  ${signature}`);
             await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) });

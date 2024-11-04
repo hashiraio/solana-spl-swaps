@@ -43,10 +43,14 @@ pub mod solana_spl_swaps {
                 from: initiator_wallet.to_account_info(),
                 to: swap_wallet.to_account_info(),
                 authority: initiator.to_account_info(),
-            }
+            },
         );
         token::transfer(cpi_context, amount)?;
-        emit!(Initiated { swap_id, secret_hash, amount });
+        emit!(Initiated {
+            swap_id,
+            secret_hash,
+            amount
+        });
 
         Ok(())
     }
@@ -59,7 +63,7 @@ pub mod solana_spl_swaps {
             redeemer_wallet,
             token_program,
             ..
-         } = ctx.accounts;
+        } = ctx.accounts;
         let SwapAccount {
             swap_id,
             secret_hash,
@@ -68,9 +72,12 @@ pub mod solana_spl_swaps {
             ..
         } = **swap_account;
 
-        require!(hash::hash(&secret).as_ref() == &secret_hash, SwapError::InvalidSecret);
+        require!(
+            hash::hash(&secret).as_ref() == &secret_hash,
+            SwapError::InvalidSecret
+        );
 
-        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump] ]];
+        let pda_seeds: &[&[&[u8]]] = &[&[b"swap_account", &swap_id, &[bump]]];
         // Transfer the tokens to the redeemer
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
@@ -78,8 +85,9 @@ pub mod solana_spl_swaps {
                 from: swap_wallet.to_account_info(),
                 to: redeemer_wallet.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }
-        ).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::transfer(cpi_context, amount)?;
 
         emit!(Redeemed { swap_id, secret });
@@ -90,8 +98,9 @@ pub mod solana_spl_swaps {
                 account: swap_wallet.to_account_info(),
                 destination: initiator.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }
-        ).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::close_account(cpi_context)?;
 
         Ok(())
@@ -106,19 +115,29 @@ pub mod solana_spl_swaps {
             initiator_wallet,
             ..
         } = ctx.accounts;
-        let SwapAccount { expiry_slot, swap_id, amount, bump, .. } = **swap_account;
+        let SwapAccount {
+            expiry_slot,
+            swap_id,
+            amount,
+            bump,
+            ..
+        } = **swap_account;
 
-        require!(Clock::get()?.slot >= expiry_slot, SwapError::RefundBeforeExpiry);
+        require!(
+            Clock::get()?.slot >= expiry_slot,
+            SwapError::RefundBeforeExpiry
+        );
 
-        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump] ]];
+        let pda_seeds: &[&[&[u8]]] = &[&[b"swap_account", &swap_id, &[bump]]];
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
             token::Transfer {
                 from: swap_wallet.to_account_info(),
                 to: initiator_wallet.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }
-        ).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::transfer(cpi_context, amount)?;
 
         emit!(Refunded { swap_id });
@@ -129,8 +148,9 @@ pub mod solana_spl_swaps {
                 account: swap_wallet.to_account_info(),
                 destination: initiator.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }
-        ).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::close_account(cpi_context)?;
 
         Ok(())
@@ -145,9 +165,14 @@ pub mod solana_spl_swaps {
             initiator_wallet,
             ..
         } = ctx.accounts;
-        let SwapAccount { swap_id, amount, bump, .. } = **swap_account;
+        let SwapAccount {
+            swap_id,
+            amount,
+            bump,
+            ..
+        } = **swap_account;
 
-        let pda_seeds: &[&[&[u8]]] = &[&[ b"swap_account", &swap_id, &[bump]]];
+        let pda_seeds: &[&[&[u8]]] = &[&[b"swap_account", &swap_id, &[bump]]];
 
         let cpi_context = CpiContext::new(
             token_program.to_account_info(),
@@ -155,7 +180,9 @@ pub mod solana_spl_swaps {
                 from: swap_wallet.to_account_info(),
                 to: initiator_wallet.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::transfer(cpi_context, amount)?;
 
         emit!(InstantRefunded { swap_id });
@@ -167,7 +194,9 @@ pub mod solana_spl_swaps {
                 account: swap_wallet.to_account_info(),
                 destination: initiator.to_account_info(),
                 authority: swap_account.to_account_info(),
-            }).with_signer(pda_seeds);
+            },
+        )
+        .with_signer(pda_seeds);
         token::close_account(cpi_context)?;
 
         Ok(())
@@ -182,7 +211,7 @@ pub struct SwapAccount {
     secret_hash: [u8; 32],
     expiry_slot: u64,
     amount: Lamports,
-    bump: u8,  // Used for pda_seeds in refund & redeem
+    bump: u8, // Used for pda_seeds in refund & redeem
 }
 
 #[derive(Accounts)]
@@ -266,9 +295,9 @@ pub struct InstantRefund<'info> {
     #[account(mut, token::authority = swap_account)]
     pub swap_wallet: Account<'info, TokenAccount>,
 
-    /// CHECK: Initiator's address for PDA rent refund and signature verification
+    /// CHECK: Initiator's address for PDA rent refund
     #[account(mut)]
-    pub initiator: Signer<'info>,
+    pub initiator: AccountInfo<'info>,
 
     #[account(mut, token::authority = initiator)]
     pub initiator_wallet: Account<'info, TokenAccount>,
@@ -312,7 +341,9 @@ pub enum SwapError {
     #[msg("The provided redeemer is not the intended recipient of the swap amount")]
     InvalidRedeemer,
 
-    #[msg("The provided initiator/refundee is not the original initiator of the given swap account")]
+    #[msg(
+        "The provided initiator/refundee is not the original initiator of the given swap account"
+    )]
     InvalidRefundee,
 
     #[msg("The provided secret does not correspond to the secret hash in the swap account")]
