@@ -28,51 +28,55 @@ describe("Testing one way swap between Alice and Bob", () => {
     const bob = new web3.Keypair();
     let bobTokenAccount: web3.PublicKey;
 
-    const [swapAccount,] = web3.PublicKey.findProgramAddressSync(
-        [Buffer.from("swap_account"), alice.publicKey.toBuffer(), secretHash],
+    // Sponsors the PDA rent and transaction fees
+    const sponsor = new web3.Keypair();
+
+    const [swapData,] = web3.PublicKey.findProgramAddressSync(
+        [alice.publicKey.toBuffer(), secretHash],
         program.programId
     );
-    const [swapTokenAccount,] = web3.PublicKey.findProgramAddressSync([mint.publicKey.toBuffer()], program.programId);
+    const [tokenVault,] = web3.PublicKey.findProgramAddressSync([mint.publicKey.toBuffer()], program.programId);
 
     let latestBlockHash: web3.BlockhashWithExpiryBlockHeight;
 
     before(async () => {
         latestBlockHash = await connection.getLatestBlockhash();
-        // Fund alice's token acc with 1 SOL, these will also be used for setting up the test
-        const signature = await connection.requestAirdrop(alice.publicKey, web3.LAMPORTS_PER_SOL);
+        // Fund sponsor with 1 SOL
+        const signature = await connection.requestAirdrop(sponsor.publicKey, web3.LAMPORTS_PER_SOL);
         await connection.confirmTransaction({ signature, ...latestBlockHash });
 
         // Create Mint and Associated Token Accounts
         try {
-            await spl.createMint(connection, alice, mintAuthority.publicKey, null, 0, mint);
+            await spl.createMint(connection, sponsor, mintAuthority.publicKey, null, 0, mint);
         } catch (_) {
             console.log("Mint already exists");
         }
-        aliceTokenAccount = await spl.createAssociatedTokenAccount(connection, alice, mint.publicKey, alice.publicKey);
-        bobTokenAccount = await spl.createAssociatedTokenAccount(connection, alice, mint.publicKey, bob.publicKey);
+        aliceTokenAccount = await spl.createAssociatedTokenAccount(connection, sponsor, mint.publicKey, alice.publicKey);
+        bobTokenAccount = await spl.createAssociatedTokenAccount(connection, sponsor, mint.publicKey, bob.publicKey);
 
         // Fund alice's token acc with tokens
-        await spl.mintTo(connection, alice, mint.publicKey, aliceTokenAccount, mintAuthority, swapAmount.toNumber() * 10)
+        await spl.mintTo(connection, sponsor, mint.publicKey, aliceTokenAccount, mintAuthority, swapAmount.toNumber() * 10)
         await connection.confirmTransaction({ signature, ...latestBlockHash })
 
         console.log(
             `Account Information:
-\tAlice:    ${alice.publicKey} \t Alice TokenAcc: \t${aliceTokenAccount}
-\tBob:      ${bob.publicKey} \t Bob TokenAcc: \t${bobTokenAccount}
-\tSwap Acc: ${swapAccount} \t Swap TokenAcc: \t\t${swapTokenAccount}
-\tMint:     ${mint.publicKey}\t Mint Authority: \t${mintAuthority.publicKey}\n`
-        );
+Alice     : ${alice.publicKey}\tAlice TokenAcc:\t${aliceTokenAccount}
+Bob       : ${bob.publicKey}\tBob TokenAcc:\t${bobTokenAccount}
+Swap Data : ${swapData}\tToken Vault:\t${tokenVault}
+Mint      : ${mint.publicKey}\tMint Authority:\t${mintAuthority.publicKey}
+Sponsor   : ${sponsor.publicKey}\n`);
     });
 
     async function aliceInitiate() {
         const signature = await program.methods
-            .initiate(swapAmount, swapExpiresIn, bobTokenAccount, [...secretHash])
+            .initiate(swapExpiresIn, bob.publicKey, [...secretHash], swapAmount)
             .accounts({
                 initiator: alice.publicKey,
                 initiatorTokenAccount: aliceTokenAccount,
                 mint: mint.publicKey,
+                sponsor: sponsor.publicKey,
             })
-            .signers([alice])
+            .signers([alice, sponsor])
             .rpc();
         await connection.confirmTransaction({signature, ...latestBlockHash});
         console.log(`\tInitiate: \t${signature}`);
@@ -90,10 +94,10 @@ describe("Testing one way swap between Alice and Bob", () => {
         const bobBalanceBefore = (await connection.getTokenAccountBalance(bobTokenAccount)).value.uiAmount;
         const signature = await program.methods.redeem([...secret])
             .accounts({
-                initiator: alice.publicKey,
                 redeemerTokenAccount: bobTokenAccount,
-                swapAccount,
-                swapTokenAccount,
+                sponsor: sponsor.publicKey,
+                swapData,
+                tokenVault,
             })
             .rpc();
         await connection.confirmTransaction({signature, ...latestBlockHash});
@@ -111,10 +115,10 @@ describe("Testing one way swap between Alice and Bob", () => {
         const aliceBalanceBefore = (await connection.getTokenAccountBalance(aliceTokenAccount)).value.uiAmount;
         const signature = await program.methods.refund()
             .accounts({
-                swapAccount,
-                swapTokenAccount: swapTokenAccount,
-                initiator: alice.publicKey,
                 initiatorTokenAccount: aliceTokenAccount,
+                sponsor: sponsor.publicKey,
+                swapData,
+                tokenVault,
             })
             .rpc();
         await connection.confirmTransaction({ signature, ...latestBlockHash });
@@ -129,12 +133,11 @@ describe("Testing one way swap between Alice and Bob", () => {
         const aliceBalanceBefore = (await connection.getTokenAccountBalance(aliceTokenAccount)).value.uiAmount;
         const signature = await program.methods.instantRefund()
             .accounts({
-                initiator: alice.publicKey,
                 initiatorTokenAccount: aliceTokenAccount,
                 redeemer: bob.publicKey,
-                redeemerTokenAccount: bobTokenAccount,
-                swapAccount,
-                swapTokenAccount: swapTokenAccount,
+                sponsor: sponsor.publicKey,
+                swapData,
+                tokenVault,
             })
             .signers([bob])
             .rpc();
