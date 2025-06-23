@@ -27,16 +27,6 @@ pub mod solana_spl_swaps {
             ..
         } = ctx.accounts;
 
-        *ctx.accounts.swap_data = SwapAccount {
-            initiator: initiator.key(),
-            expiry_slot: Clock::get()?.slot + expires_in_slots,
-            redeemer,
-            secret_hash,
-            swap_amount,
-            identity_pda_bump: ctx.bumps.identity_pda,
-            sponsor: sponsor.key(),
-        };
-
         let token_transfer_context = CpiContext::new(
             token_program.to_account_info(),
             token::Transfer {
@@ -46,6 +36,16 @@ pub mod solana_spl_swaps {
             },
         );
         token::transfer(token_transfer_context, swap_amount)?;
+
+        *ctx.accounts.swap_data = SwapAccount {
+            initiator: initiator.key(),
+            expiry_slot: Clock::get()?.slot + expires_in_slots,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            identity_pda_bump: ctx.bumps.identity_pda,
+            sponsor: sponsor.key(),
+        };
 
         emit!(Initiated {
             expires_in_slots,
