@@ -328,6 +328,7 @@ pub struct InstantRefund<'info> {
     pub initiator_token_account: Account<'info, TokenAccount>,
 
     /// Redeemer must sign this transaction
+    #[account(mut, address = swap_data.redeemer @ SwapError::InvalidRedeemer)]
     pub redeemer: Signer<'info>,
 
     /// CHECK: Sponsor's address for PDA rent refund
