@@ -4,6 +4,9 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount};
 
 declare_id!("2WXpY8havGjfRxme9LUxtjFHTh1EfU3ur4v6wiK4KdNC");
 
+/// The size of Anchor's internal discriminator in a PDA's memory
+const ANCHOR_DISCRIMINATOR: usize = 8;
+
 #[program]
 pub mod solana_spl_swaps {
     use super::*;
@@ -215,7 +218,7 @@ pub struct Initiate<'info> {
         payer = sponsor,
         seeds = [],
         bump,
-        space = 0,
+        space = ANCHOR_DISCRIMINATOR,
     )]
     pub identity_pda: AccountInfo<'info>,
 
@@ -228,7 +231,7 @@ pub struct Initiate<'info> {
         payer = sponsor,
         seeds = [initiator.key().as_ref(), &secret_hash],
         bump,
-        space = 8 + SwapAccount::INIT_SPACE,
+        space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
     )]
     pub swap_data: Account<'info, SwapAccount>,
 
