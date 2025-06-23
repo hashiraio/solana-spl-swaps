@@ -30,6 +30,7 @@ pub mod solana_spl_swaps {
         let Initiate {
             initiator,
             initiator_token_account,
+            mint,
             sponsor,
             token_program,
             token_vault,
@@ -59,6 +60,7 @@ pub mod solana_spl_swaps {
         emit!(Initiated {
             expires_in_slots,
             initiator: initiator.key(),
+            mint: mint.key(),
             redeemer,
             secret_hash,
             swap_amount,
@@ -398,6 +400,7 @@ pub struct Initiated {
     /// `expires_in_slots` represents the number of slots after which (non-instant) refunds are allowed
     pub expires_in_slots: u64,
     pub initiator: Pubkey,
+    pub mint: Pubkey,
     pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
 }
