@@ -159,7 +159,7 @@ Sponsor   : ${sponsor.publicKey}\n`
     await aliceInitiate(); // Re-initiating for this test
     const expiryMs = swapExpiresIn.toNumber() * 400;
     console.log(`Awaiting timelock of ${expiryMs}ms for Refund`);
-    await new Promise((r) => setTimeout(r, expiryMs + 400));
+    await new Promise((r) => setTimeout(r, expiryMs + 1000)); // Add an extra sec
     const aliceBalanceBefore = (
       await connection.getTokenAccountBalance(aliceTokenAccount)
     ).value.uiAmount;
