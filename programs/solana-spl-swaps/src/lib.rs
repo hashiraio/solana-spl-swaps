@@ -26,6 +26,7 @@ pub mod solana_spl_swaps {
         redeemer: Pubkey,
         secret_hash: [u8; 32],
         swap_amount: u64, // In base units of the token
+        destination_data: Option<Vec<u8>>,
     ) -> Result<()> {
         let Initiate {
             initiator,
@@ -64,6 +65,7 @@ pub mod solana_spl_swaps {
             redeemer,
             secret_hash,
             swap_amount,
+            destination_data,
         });
 
         Ok(())
@@ -418,6 +420,8 @@ pub struct Initiated {
     pub mint: Pubkey,
     pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    /// Information regarding the destination chain in the atomic swap
+    pub destination_data: Option<Vec<u8>>,
 }
 /// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault
 #[event]

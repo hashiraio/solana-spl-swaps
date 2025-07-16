@@ -24,6 +24,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     .createHash("sha256")
     .update(secret)
     .digest();
+  const destinationData = crypto.randomBytes(256); // can be null
 
   const mint = web3.Keypair.fromSeed(new Uint8Array(32).fill(33));
   const mintAuthority = web3.Keypair.fromSeed(new Uint8Array(32).fill(36));
@@ -108,7 +109,13 @@ Sponsor   : ${sponsor.publicKey}\n`
 
   async function aliceInitiate() {
     const signature = await program.methods
-      .initiate(swapExpiresIn, bob.publicKey, [...secretHash], swapAmount)
+      .initiate(
+        swapExpiresIn,
+        bob.publicKey,
+        [...secretHash],
+        swapAmount,
+        destinationData
+      )
       .accounts({
         initiator: alice.publicKey,
         initiatorTokenAccount: aliceTokenAccount,
