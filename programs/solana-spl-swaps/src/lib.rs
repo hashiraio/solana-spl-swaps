@@ -317,7 +317,12 @@ pub struct Redeem<'info> {
 
     /// The PDA holding the state information of the atomic swap. Will be closed upon successful execution
     /// and the resulting rent refund will be sent to the sponsor.
-    #[account(mut, close = sponsor)]
+    #[account(
+        mut,
+        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
+        bump,
+        close = sponsor,
+    )]
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
@@ -343,7 +348,12 @@ pub struct Refund<'info> {
 
     /// The PDA holding the state information of the atomic swap. Will be closed upon successful execution
     /// and the resulting rent refund will be sent to the sponsor.
-    #[account(mut, close = sponsor)]
+    #[account(
+        mut,
+        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
+        bump,
+        close = sponsor,
+    )]
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
@@ -369,7 +379,12 @@ pub struct InstantRefund<'info> {
 
     /// The PDA holding the state information of the atomic swap. Will be closed upon successful execution
     /// and the resulting rent refund will be sent to the sponsor.
-    #[account(mut, close = sponsor)]
+    #[account(
+        mut,
+        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
+        bump,
+        close = sponsor,
+    )]
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
