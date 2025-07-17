@@ -19,7 +19,9 @@ pub mod solana_spl_swaps {
     /// in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals
     /// must be provided as 1,000,000.  
-    /// `expires_in_slots` represents the number of slots after which (non-instant) refunds are allowed.
+    /// `expires_in_slots` represents the number of slots after which (non-instant) refunds are allowed.  
+    /// `destination_data` can hold optional information regarding the destination chain
+    /// in the atomic swap, to be emitted in the logs as-is.
     pub fn initiate(
         ctx: Context<Initiate>,
         expires_in_slots: u64,
@@ -244,8 +246,8 @@ pub struct Initiate<'info> {
     pub identity_pda: AccountInfo<'info>,
 
     /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.  
-    /// The choice of seeds ensures that any swap with equal `initiator` and
-    /// `secret_hash` cannot be created until an existing one completes.  
+    /// The choice of seeds ensure that any swap with equal `initiator` and
+    /// `secret_hash` wont be created until an existing one completes.  
     /// This PDA will be deleted upon completion of the swap.
     #[account(
         init,
@@ -261,7 +263,7 @@ pub struct Initiate<'info> {
     /// of type `mint` for the atomic swap.  
     /// It is intended to be reused for all swaps involving the same mint.  
     /// Just like `identity_pda`, it will be created during the first most invocation of `initiate()`
-    /// with every distinct mint using the `init_if_needed` attribute.
+    /// of every distinct mint using the `init_if_needed` attribute.
     #[account(
         init_if_needed,
         payer = sponsor,
