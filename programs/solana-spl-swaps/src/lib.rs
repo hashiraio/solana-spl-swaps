@@ -84,16 +84,11 @@ pub mod solana_spl_swaps {
         let SwapAccount {
             identity_pda_bump,
             initiator,
-            redeemer,
             secret_hash,
             swap_amount,
             ..
         } = **swap_data;
 
-        require!(
-            redeemer_token_account.owner == redeemer,
-            SwapError::InvalidRedeemer
-        );
         require!(
             hash::hash(&secret).to_bytes() == secret_hash,
             SwapError::InvalidSecret
@@ -138,10 +133,6 @@ pub mod solana_spl_swaps {
         } = **swap_data;
 
         require!(
-            initiator_token_account.owner == initiator,
-            SwapError::InvalidInitiator
-        );
-        require!(
             Clock::get()?.slot > expiry_slot,
             SwapError::RefundBeforeExpiry
         );
@@ -185,11 +176,6 @@ pub mod solana_spl_swaps {
             swap_amount,
             ..
         } = **swap_data;
-
-        require!(
-            initiator_token_account.owner == initiator,
-            SwapError::InvalidInitiator
-        );
 
         let pda_seeds: &[&[&[u8]]] = &[&[&[identity_pda_bump]]];
         let token_transfer_context = CpiContext::new(
@@ -331,8 +317,8 @@ pub struct Redeem<'info> {
     #[account(mut, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// CHECK: The token account of the redeemer. The authority is verified in the function body.
-    #[account(mut)]
+    /// CHECK: The token account of the redeemer
+    #[account(mut, token::authority = swap_data.redeemer)]
     pub redeemer_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Sponsor's address for refunding PDA rent
@@ -362,8 +348,8 @@ pub struct Refund<'info> {
     #[account(mut, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// CHECK: The token account of the initiator. The authority is verfied in the function body.
-    #[account(mut)]
+    /// CHECK: The token account of the initiator
+    #[account(mut, token::authority = swap_data.initiator)]
     pub initiator_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Sponsor's address for refunding PDA rent
@@ -393,8 +379,8 @@ pub struct InstantRefund<'info> {
     #[account(mut, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// CHECK: The token account of the initiator. The authority is verified within the function body.
-    #[account(mut)]
+    /// CHECK: The token account of the initiator
+    #[account(mut, token::authority = swap_data.initiator)]
     pub initiator_token_account: Account<'info, TokenAccount>,
 
     /// The redeemer of the atomic swap. They must sign this transaction.
@@ -445,10 +431,7 @@ pub struct InstantRefunded {
 
 #[error_code]
 pub enum SwapError {
-    #[msg("The provided token account does not belong to the initiator of this swap")]
-    InvalidInitiator,
-
-    #[msg("The provided token account does not belong to the redeemer of this swap")]
+    #[msg("The provider redeemer is not the original redeemer of this swap")]
     InvalidRedeemer,
 
     #[msg("The provided secret does not correspond to the secret hash of this swap")]
