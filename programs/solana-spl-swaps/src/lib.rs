@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash;
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
 
-declare_id!("2WXpY8havGjfRxme9LUxtjFHTh1EfU3ur4v6wiK4KdNC");
+declare_id!("gdnvdMCHJgnidtU7SL8RkRshHPvDJU1pdfZEpoLvqdU");
 
 /// The size of Anchor's internal discriminator in a PDA's memory
 const ANCHOR_DISCRIMINATOR: usize = 8;
