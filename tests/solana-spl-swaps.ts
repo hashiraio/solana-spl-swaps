@@ -38,7 +38,7 @@ describe("Testing one way swap between Alice and Bob", () => {
   let bobTokenAccount: web3.PublicKey;
 
   // Sponsors the PDA rent and transaction fees
-  const sponsor = new web3.Keypair();
+  const rentSponsor = new web3.Keypair();
 
   const [swapData] = web3.PublicKey.findProgramAddressSync(
     [alice.publicKey.toBuffer(), secretHash],
@@ -53,9 +53,9 @@ describe("Testing one way swap between Alice and Bob", () => {
 
   before(async () => {
     latestBlockHash = await connection.getLatestBlockhash();
-    // Fund sponsor with 1 SOL
+    // Fund rent sponsor with 1 SOL
     const signature = await connection.requestAirdrop(
-      sponsor.publicKey,
+      rentSponsor.publicKey,
       web3.LAMPORTS_PER_SOL
     );
     await connection.confirmTransaction({ signature, ...latestBlockHash });
@@ -64,7 +64,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     try {
       await spl.createMint(
         connection,
-        sponsor,
+        rentSponsor,
         mintAuthority.publicKey,
         null,
         0,
@@ -75,13 +75,13 @@ describe("Testing one way swap between Alice and Bob", () => {
     }
     aliceTokenAccount = await spl.createAssociatedTokenAccount(
       connection,
-      sponsor,
+      rentSponsor,
       mint.publicKey,
       alice.publicKey
     );
     bobTokenAccount = await spl.createAssociatedTokenAccount(
       connection,
-      sponsor,
+      rentSponsor,
       mint.publicKey,
       bob.publicKey
     );
@@ -89,7 +89,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     // Fund alice's token acc with tokens
     await spl.mintTo(
       connection,
-      sponsor,
+      rentSponsor,
       mint.publicKey,
       aliceTokenAccount,
       mintAuthority,
@@ -103,7 +103,7 @@ Alice     : ${alice.publicKey}\tAlice TokenAcc:\t${aliceTokenAccount}
 Bob       : ${bob.publicKey}\tBob TokenAcc:\t${bobTokenAccount}
 Swap Data : ${swapData}\tToken Vault:\t${tokenVault}
 Mint      : ${mint.publicKey}\tMint Authority:\t${mintAuthority.publicKey}
-Sponsor   : ${sponsor.publicKey}\n`
+Sponsor   : ${rentSponsor.publicKey}\n`
     );
   });
 
@@ -120,9 +120,9 @@ Sponsor   : ${sponsor.publicKey}\n`
         initiator: alice.publicKey,
         initiatorTokenAccount: aliceTokenAccount,
         mint: mint.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
       })
-      .signers([alice, sponsor])
+      .signers([alice, rentSponsor])
       .rpc();
     await connection.confirmTransaction({ signature, ...latestBlockHash });
     console.log(`\tInitiate: \t${signature}`);
@@ -148,7 +148,7 @@ Sponsor   : ${sponsor.publicKey}\n`
       .redeem([...secret])
       .accounts({
         redeemerTokenAccount: bobTokenAccount,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
         swapData,
         tokenVault,
       })
@@ -174,7 +174,7 @@ Sponsor   : ${sponsor.publicKey}\n`
       .refund()
       .accounts({
         initiatorTokenAccount: aliceTokenAccount,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
         swapData,
         tokenVault,
       })
@@ -198,7 +198,7 @@ Sponsor   : ${sponsor.publicKey}\n`
       .accounts({
         initiatorTokenAccount: aliceTokenAccount,
         redeemer: bob.publicKey,
-        sponsor: sponsor.publicKey,
+        rentSponsor: rentSponsor.publicKey,
         swapData,
         tokenVault,
       })
