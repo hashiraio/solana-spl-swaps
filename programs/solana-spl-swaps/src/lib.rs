@@ -11,7 +11,7 @@ const ANCHOR_DISCRIMINATOR: usize = 8;
 pub mod solana_spl_swaps {
     use super::*;
 
-    /// Initiates the atomic swap. Funds are transferred from the initiator to the token vault.
+    /// Initiates the atomic swap. Funds are transferred from the funder to the token vault.
     /// `swap_amount` represents the quantity of tokens to be transferred through this atomic swap
     /// in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals
@@ -22,14 +22,15 @@ pub mod solana_spl_swaps {
     pub fn initiate(
         ctx: Context<Initiate>,
         redeemer: Pubkey,
+        refundee: Pubkey,
         secret_hash: [u8; 32],
         swap_amount: u64, // In base units of the token
         timelock: u64,
         destination_data: Option<Vec<u8>>,
     ) -> Result<()> {
         let Initiate {
-            initiator,
-            initiator_token_account,
+            funder,
+            funder_token_account,
             mint,
             rent_sponsor,
             token_program,
@@ -40,9 +41,9 @@ pub mod solana_spl_swaps {
         let token_transfer_context = CpiContext::new(
             token_program.to_account_info(),
             token::Transfer {
-                from: initiator_token_account.to_account_info(),
+                from: funder_token_account.to_account_info(),
                 to: token_vault.to_account_info(),
-                authority: initiator.to_account_info(),
+                authority: funder.to_account_info(),
             },
         );
         token::transfer(token_transfer_context, swap_amount)?;
@@ -52,9 +53,9 @@ pub mod solana_spl_swaps {
             bump: ctx.bumps.swap_data,
             identity_pda_bump: ctx.bumps.identity_pda,
             rent_sponsor: rent_sponsor.key(),
-            initiator: initiator.key(),
             mint: mint.key(),
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             timelock,
@@ -62,9 +63,9 @@ pub mod solana_spl_swaps {
 
         emit!(Initiated {
             timelock,
-            initiator: initiator.key(),
             mint: mint.key(),
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             destination_data,
@@ -85,9 +86,9 @@ pub mod solana_spl_swaps {
         } = ctx.accounts;
         let SwapAccount {
             identity_pda_bump,
-            initiator,
             mint,
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             timelock,
@@ -112,9 +113,9 @@ pub mod solana_spl_swaps {
         token::transfer(token_transfer_context, swap_amount)?;
 
         emit!(Redeemed {
-            initiator,
             mint,
             redeemer,
+            refundee,
             secret,
             swap_amount,
             timelock,
@@ -123,13 +124,13 @@ pub mod solana_spl_swaps {
         Ok(())
     }
 
-    /// Funds are returned to the initiator, given that no redeems have occured
+    /// Funds are returned to the refundee, given that no redeems have occured
     /// and the expiry slot has been reached.
     /// This instruction does not require any signatures.
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         let Refund {
             identity_pda,
-            initiator_token_account,
+            refundee_token_account,
             swap_data,
             token_vault,
             token_program,
@@ -137,9 +138,9 @@ pub mod solana_spl_swaps {
         } = ctx.accounts;
         let SwapAccount {
             identity_pda_bump,
-            initiator,
             mint,
             redeemer,
+            refundee,
             expiry_slot,
             secret_hash,
             swap_amount,
@@ -157,7 +158,7 @@ pub mod solana_spl_swaps {
             token_program.to_account_info(),
             token::Transfer {
                 from: token_vault.to_account_info(),
-                to: initiator_token_account.to_account_info(),
+                to: refundee_token_account.to_account_info(),
                 authority: identity_pda.to_account_info(),
             },
         )
@@ -165,9 +166,9 @@ pub mod solana_spl_swaps {
         token::transfer(token_transfer_context, swap_amount)?;
 
         emit!(Refunded {
-            initiator,
             mint,
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             timelock,
@@ -176,13 +177,13 @@ pub mod solana_spl_swaps {
         Ok(())
     }
 
-    /// Funds are returned to the initiator, with the redeemer's consent.
+    /// Funds are returned to the refundee, with the redeemer's consent.
     /// As such, the redeemer's signature is required for this instruction.
     /// This allows for refunds before the expiry slot.
     pub fn instant_refund(ctx: Context<InstantRefund>) -> Result<()> {
         let InstantRefund {
             identity_pda,
-            initiator_token_account,
+            refundee_token_account,
             swap_data,
             token_program,
             token_vault,
@@ -190,9 +191,9 @@ pub mod solana_spl_swaps {
         } = ctx.accounts;
         let SwapAccount {
             identity_pda_bump,
-            initiator,
             mint,
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             timelock,
@@ -204,7 +205,7 @@ pub mod solana_spl_swaps {
             token_program.to_account_info(),
             token::Transfer {
                 from: token_vault.to_account_info(),
-                to: initiator_token_account.to_account_info(),
+                to: refundee_token_account.to_account_info(),
                 authority: identity_pda.to_account_info(),
             },
         )
@@ -212,9 +213,9 @@ pub mod solana_spl_swaps {
         token::transfer(token_transfer_context, swap_amount)?;
 
         emit!(InstantRefunded {
-            initiator,
             mint,
             redeemer,
+            refundee,
             secret_hash,
             swap_amount,
             timelock,
@@ -240,12 +241,12 @@ pub struct SwapAccount {
     /// This will be referenced during the refund of the same upon closing this PDA.
     pub rent_sponsor: Pubkey,
 
-    /// The initiator of the atomic swap
-    pub initiator: Pubkey,
     /// The mint for this atomic swap
     pub mint: Pubkey,
     /// The redeemer of the atomic swap
     pub redeemer: Pubkey,
+    /// The refundee of the atomic swap
+    pub refundee: Pubkey,
     /// The secret hash associated with the atomic swap
     pub secret_hash: [u8; 32],
     /// The quantity tokens to be transferred through this atomic swap
@@ -253,7 +254,6 @@ pub struct SwapAccount {
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals
     /// must be provided as 1,000,000.
     pub swap_amount: u64,
-
     /// Represents the number of slots after which (non-instant) refunds are allowed
     pub timelock: u64,
 }
@@ -262,7 +262,7 @@ pub struct SwapAccount {
 // The parameters must have the exact name and order as specified in the underlying function
 // to avoid "seed constraint violation" errors.
 // Refer: https://www.anchor-lang.com/docs/references/account-constraints#instruction-attribute
-#[instruction(redeemer: Pubkey, secret_hash: [u8; 32], swap_amount: u64, timelock: u64)]
+#[instruction(redeemer: Pubkey, refundee: Pubkey, secret_hash: [u8; 32], swap_amount: u64, timelock: u64)]
 pub struct Initiate<'info> {
     /// CHECK: A permanent PDA that represents this swap program for authorizing
     /// the token transfers of the `token_vault` PDA.  
@@ -284,8 +284,8 @@ pub struct Initiate<'info> {
         init,
         payer = rent_sponsor,
         seeds = [
-            initiator.key().as_ref(),
             redeemer.as_ref(),
+            refundee.as_ref(),
             &secret_hash,
             &swap_amount.to_le_bytes(),
             &timelock.to_le_bytes(),
@@ -311,16 +311,17 @@ pub struct Initiate<'info> {
     )]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// The initiator of the atomic swap. They must sign this transaction.
-    pub initiator: Signer<'info>,
+    /// The party that deposits the funds to be involved in the atomic swap.
+    /// They must sign this transaction.
+    pub funder: Signer<'info>,
 
-    /// The token account of the initiator
+    /// The token account of the funder
     #[account(
         mut,
         token::mint = mint,
-        token::authority = initiator,
+        token::authority = funder,
     )]
-    pub initiator_token_account: Account<'info, TokenAccount>,
+    pub funder_token_account: Account<'info, TokenAccount>,
 
     /// The mint of the tokens involved in this swap. As this is a parameter, this program can thus be reused
     /// for atomic swaps with different mints.
@@ -347,8 +348,8 @@ pub struct Redeem<'info> {
     #[account(
         mut,
         seeds = [
-            swap_data.initiator.key().as_ref(),
             swap_data.redeemer.as_ref(),
+            swap_data.refundee.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -384,8 +385,8 @@ pub struct Refund<'info> {
     #[account(
         mut,
         seeds = [
-            swap_data.initiator.key().as_ref(),
             swap_data.redeemer.as_ref(),
+            swap_data.refundee.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -399,9 +400,9 @@ pub struct Refund<'info> {
     #[account(mut, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// CHECK: The token account of the initiator
-    #[account(mut, token::authority = swap_data.initiator)]
-    pub initiator_token_account: Account<'info, TokenAccount>,
+    /// CHECK: The token account of the refundee
+    #[account(mut, token::authority = swap_data.refundee)]
+    pub refundee_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Rent sponsor's address for refunding PDA rent
     #[account(mut, address = swap_data.rent_sponsor @ SwapError::InvalidRentSponsor)]
@@ -421,8 +422,8 @@ pub struct InstantRefund<'info> {
     #[account(
         mut,
         seeds = [
-            swap_data.initiator.key().as_ref(),
             swap_data.redeemer.as_ref(),
+            swap_data.refundee.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -436,9 +437,9 @@ pub struct InstantRefund<'info> {
     #[account(mut, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
-    /// CHECK: The token account of the initiator
-    #[account(mut, token::authority = swap_data.initiator)]
-    pub initiator_token_account: Account<'info, TokenAccount>,
+    /// CHECK: The token account of the refundee
+    #[account(mut, token::authority = swap_data.refundee)]
+    pub refundee_token_account: Account<'info, TokenAccount>,
 
     /// The redeemer of the atomic swap. They must sign this transaction.
     #[account(mut, address = swap_data.redeemer @ SwapError::InvalidRedeemer)]
@@ -451,12 +452,12 @@ pub struct InstantRefund<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// Represents the initiated state of the swap where the initiator has deposited funds into the vault
+/// Represents the initiated state of the swap where the funder has deposited funds into the vault
 #[event]
 pub struct Initiated {
-    pub initiator: Pubkey,
     pub mint: Pubkey,
     pub redeemer: Pubkey,
+    pub refundee: Pubkey,
     pub secret_hash: [u8; 32],
     /// The quantity of tokens transferred through this atomic swap in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals will be represented as 1,000,000.
@@ -469,9 +470,9 @@ pub struct Initiated {
 /// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault
 #[event]
 pub struct Redeemed {
-    pub initiator: Pubkey,
     pub mint: Pubkey,
     pub redeemer: Pubkey,
+    pub refundee: Pubkey,
     pub secret: [u8; 32],
     pub swap_amount: u64,
     pub timelock: u64,
@@ -479,20 +480,20 @@ pub struct Redeemed {
 /// Represents the refund state of the swap, where the initiator has withdrawn funds from the vault past expiry
 #[event]
 pub struct Refunded {
-    pub initiator: Pubkey,
     pub mint: Pubkey,
     pub redeemer: Pubkey,
+    pub refundee: Pubkey,
     pub secret_hash: [u8; 32],
     pub swap_amount: u64,
     pub timelock: u64,
 }
-/// Represents the instant refund state of the swap, where the initiator has withdrawn funds the vault
-/// with the redeemer's consent
+/// Represents the instant refund state of the swap, where the refundee has obtained
+/// a refund of the funds with the redeemer's consent
 #[event]
 pub struct InstantRefunded {
-    pub initiator: Pubkey,
     pub mint: Pubkey,
     pub redeemer: Pubkey,
+    pub refundee: Pubkey,
     pub secret_hash: [u8; 32],
     pub swap_amount: u64,
     pub timelock: u64,

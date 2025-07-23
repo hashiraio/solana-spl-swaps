@@ -40,10 +40,14 @@ describe("Testing one way swap between Alice and Bob", () => {
   // Sponsors the PDA rent and transaction fees
   const rentSponsor = new web3.Keypair();
 
+  // Facilitates initiate on behalf
+  const funder = new web3.Keypair();
+  let funderTokenAccount: web3.PublicKey;
+
   const [swapData] = web3.PublicKey.findProgramAddressSync(
     [
-      alice.publicKey.toBuffer(),
       bob.publicKey.toBuffer(),
+      alice.publicKey.toBuffer(),
       secretHash,
       swapAmount.toArrayLike(Buffer, "le", 8),
       timelock.toArrayLike(Buffer, "le", 8),
@@ -91,6 +95,12 @@ describe("Testing one way swap between Alice and Bob", () => {
       mint.publicKey,
       bob.publicKey
     );
+    funderTokenAccount = await spl.createAssociatedTokenAccount(
+      connection,
+      rentSponsor,
+      mint.publicKey,
+      funder.publicKey
+    );
 
     // Fund alice's token acc with tokens
     await spl.mintTo(
@@ -98,6 +108,17 @@ describe("Testing one way swap between Alice and Bob", () => {
       rentSponsor,
       mint.publicKey,
       aliceTokenAccount,
+      mintAuthority,
+      swapAmount.toNumber() * 10
+    );
+    await connection.confirmTransaction({ signature, ...latestBlockHash });
+
+    // Fund funder's token acc with tokens
+    await spl.mintTo(
+      connection,
+      rentSponsor,
+      mint.publicKey,
+      funderTokenAccount,
       mintAuthority,
       swapAmount.toNumber() * 10
     );
@@ -117,14 +138,15 @@ Sponsor   : ${rentSponsor.publicKey}\n`
     const signature = await program.methods
       .initiate(
         bob.publicKey,
+        alice.publicKey,
         [...secretHash],
         swapAmount,
         timelock,
         destinationData
       )
       .accounts({
-        initiator: alice.publicKey,
-        initiatorTokenAccount: aliceTokenAccount,
+        funder: alice.publicKey,
+        funderTokenAccount: aliceTokenAccount,
         mint: mint.publicKey,
         rentSponsor: rentSponsor.publicKey,
       })
@@ -134,15 +156,44 @@ Sponsor   : ${rentSponsor.publicKey}\n`
     console.log(`\tInitiate: \t${signature}`);
   }
 
-  it("Test initiation", async () => {
+  it("Test initiate on behalf", async () => {
     const aliceBalanceBefore = (
       await connection.getTokenAccountBalance(aliceTokenAccount)
     ).value.uiAmount;
-    await aliceInitiate();
+    const funderPreBalance = (
+      await connection.getTokenAccountBalance(funderTokenAccount)
+    ).value.uiAmount;
+
+    const signature = await program.methods
+      .initiate(
+        bob.publicKey,
+        alice.publicKey,
+        [...secretHash],
+        swapAmount,
+        timelock,
+        destinationData
+      )
+      .accounts({
+        funder: funder.publicKey,
+        funderTokenAccount,
+        mint: mint.publicKey,
+        rentSponsor: rentSponsor.publicKey,
+      })
+      .signers([funder, rentSponsor])
+      .rpc();
+    console.log(`\tFunder initiated on behalf of alice: \t${signature}`);
+
     const aliceBalance = (
       await connection.getTokenAccountBalance(aliceTokenAccount)
     ).value.uiAmount;
-    expect(aliceBalance - aliceBalanceBefore).to.equal(-swapAmount.toNumber());
+    expect(aliceBalance).to.equal(aliceBalanceBefore);
+
+    const funderPostBalance = (
+      await connection.getTokenAccountBalance(funderTokenAccount)
+    ).value.uiAmount;
+    expect(funderPostBalance).to.equal(
+      funderPreBalance - swapAmount.toNumber()
+    );
   });
 
   it("Test redeem", async () => {
@@ -179,7 +230,7 @@ Sponsor   : ${rentSponsor.publicKey}\n`
     const signature = await program.methods
       .refund()
       .accounts({
-        initiatorTokenAccount: aliceTokenAccount,
+        refundeeTokenAccount: aliceTokenAccount,
         rentSponsor: rentSponsor.publicKey,
         swapData,
         tokenVault,
@@ -202,7 +253,7 @@ Sponsor   : ${rentSponsor.publicKey}\n`
     const signature = await program.methods
       .instantRefund()
       .accounts({
-        initiatorTokenAccount: aliceTokenAccount,
+        refundeeTokenAccount: aliceTokenAccount,
         redeemer: bob.publicKey,
         rentSponsor: rentSponsor.publicKey,
         swapData,
