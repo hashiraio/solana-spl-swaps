@@ -41,7 +41,13 @@ describe("Testing one way swap between Alice and Bob", () => {
   const rentSponsor = new web3.Keypair();
 
   const [swapData] = web3.PublicKey.findProgramAddressSync(
-    [alice.publicKey.toBuffer(), secretHash],
+    [
+      alice.publicKey.toBuffer(),
+      bob.publicKey.toBuffer(),
+      secretHash,
+      swapAmount.toArrayLike(Buffer, "le", 8),
+      timelock.toArrayLike(Buffer, "le", 8),
+    ],
     program.programId
   );
   const [tokenVault] = web3.PublicKey.findProgramAddressSync(

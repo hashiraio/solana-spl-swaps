@@ -49,9 +49,11 @@ pub mod solana_spl_swaps {
 
         *ctx.accounts.swap_data = SwapAccount {
             expiry_slot: Clock::get()?.slot + timelock,
+            bump: ctx.bumps.swap_data,
             identity_pda_bump: ctx.bumps.identity_pda,
             rent_sponsor: rent_sponsor.key(),
             initiator: initiator.key(),
+            mint: mint.key(),
             redeemer,
             secret_hash,
             swap_amount,
@@ -84,8 +86,11 @@ pub mod solana_spl_swaps {
         let SwapAccount {
             identity_pda_bump,
             initiator,
+            mint,
+            redeemer,
             secret_hash,
             swap_amount,
+            timelock,
             ..
         } = **swap_data;
 
@@ -106,7 +111,14 @@ pub mod solana_spl_swaps {
         .with_signer(pda_seeds);
         token::transfer(token_transfer_context, swap_amount)?;
 
-        emit!(Redeemed { initiator, secret });
+        emit!(Redeemed {
+            initiator,
+            mint,
+            redeemer,
+            secret,
+            swap_amount,
+            timelock,
+        });
 
         Ok(())
     }
@@ -126,9 +138,12 @@ pub mod solana_spl_swaps {
         let SwapAccount {
             identity_pda_bump,
             initiator,
+            mint,
+            redeemer,
             expiry_slot,
             secret_hash,
             swap_amount,
+            timelock,
             ..
         } = **swap_data;
 
@@ -151,7 +166,11 @@ pub mod solana_spl_swaps {
 
         emit!(Refunded {
             initiator,
+            mint,
+            redeemer,
             secret_hash,
+            swap_amount,
+            timelock,
         });
 
         Ok(())
@@ -172,8 +191,11 @@ pub mod solana_spl_swaps {
         let SwapAccount {
             identity_pda_bump,
             initiator,
+            mint,
+            redeemer,
             secret_hash,
             swap_amount,
+            timelock,
             ..
         } = **swap_data;
 
@@ -191,7 +213,11 @@ pub mod solana_spl_swaps {
 
         emit!(InstantRefunded {
             initiator,
-            secret_hash
+            mint,
+            redeemer,
+            secret_hash,
+            swap_amount,
+            timelock,
         });
 
         Ok(())
@@ -202,6 +228,9 @@ pub mod solana_spl_swaps {
 #[account]
 #[derive(InitSpace)]
 pub struct SwapAccount {
+    /// The bump that derived this PDA.
+    /// Storing this makes later verifications less expensive.
+    pub bump: u8,
     /// The exact slot after which (non-instant) refunds are allowed
     pub expiry_slot: u64,
     /// The bump associated with the identity pda.
@@ -213,6 +242,8 @@ pub struct SwapAccount {
 
     /// The initiator of the atomic swap
     pub initiator: Pubkey,
+    /// The mint for this atomic swap
+    pub mint: Pubkey,
     /// The redeemer of the atomic swap
     pub redeemer: Pubkey,
     /// The secret hash associated with the atomic swap
@@ -246,14 +277,19 @@ pub struct Initiate<'info> {
     )]
     pub identity_pda: AccountInfo<'info>,
 
-    /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.  
-    /// The choice of seeds ensure that any swap with equal `initiator` and
-    /// `secret_hash` wont be created until an existing one completes.  
+    /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.
+    /// The choice of seeds is to make the already expensive possibility of frontrunning, more expensive.
     /// This PDA will be deleted upon completion of the swap.
     #[account(
         init,
         payer = rent_sponsor,
-        seeds = [initiator.key().as_ref(), &secret_hash],
+        seeds = [
+            initiator.key().as_ref(),
+            redeemer.as_ref(),
+            &secret_hash,
+            &swap_amount.to_le_bytes(),
+            &timelock.to_le_bytes(),
+        ],
         bump,
         space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
     )]
@@ -310,8 +346,14 @@ pub struct Redeem<'info> {
     /// and the resulting rent refund will be sent to the rent_sponsor.
     #[account(
         mut,
-        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
-        bump,
+        seeds = [
+            swap_data.initiator.key().as_ref(),
+            swap_data.redeemer.as_ref(),
+            &swap_data.secret_hash,
+            &swap_data.swap_amount.to_le_bytes(),
+            &swap_data.timelock.to_le_bytes(),
+        ],
+        bump = swap_data.bump,
         close = rent_sponsor,
     )]
     pub swap_data: Account<'info, SwapAccount>,
@@ -341,8 +383,14 @@ pub struct Refund<'info> {
     /// and the resulting rent refund will be sent to the rent_sponsor.
     #[account(
         mut,
-        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
-        bump,
+        seeds = [
+            swap_data.initiator.key().as_ref(),
+            swap_data.redeemer.as_ref(),
+            &swap_data.secret_hash,
+            &swap_data.swap_amount.to_le_bytes(),
+            &swap_data.timelock.to_le_bytes(),
+        ],
+        bump = swap_data.bump,
         close = rent_sponsor,
     )]
     pub swap_data: Account<'info, SwapAccount>,
@@ -372,8 +420,14 @@ pub struct InstantRefund<'info> {
     /// and the resulting rent refund will be sent to the rent_sponsor.
     #[account(
         mut,
-        seeds = [swap_data.initiator.as_ref(), &swap_data.secret_hash],
-        bump,
+        seeds = [
+            swap_data.initiator.key().as_ref(),
+            swap_data.redeemer.as_ref(),
+            &swap_data.secret_hash,
+            &swap_data.swap_amount.to_le_bytes(),
+            &swap_data.timelock.to_le_bytes(),
+        ],
+        bump = swap_data.bump,
         close = rent_sponsor,
     )]
     pub swap_data: Account<'info, SwapAccount>,
@@ -400,15 +454,15 @@ pub struct InstantRefund<'info> {
 /// Represents the initiated state of the swap where the initiator has deposited funds into the vault
 #[event]
 pub struct Initiated {
+    pub initiator: Pubkey,
+    pub mint: Pubkey,
+    pub redeemer: Pubkey,
+    pub secret_hash: [u8; 32],
     /// The quantity of tokens transferred through this atomic swap in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals will be represented as 1,000,000.
     pub swap_amount: u64,
     /// `timelock` represents the number of slots after which (non-instant) refunds are allowed
     pub timelock: u64,
-    pub initiator: Pubkey,
-    pub mint: Pubkey,
-    pub redeemer: Pubkey,
-    pub secret_hash: [u8; 32],
     /// Information regarding the destination chain in the atomic swap
     pub destination_data: Option<Vec<u8>>,
 }
@@ -416,20 +470,32 @@ pub struct Initiated {
 #[event]
 pub struct Redeemed {
     pub initiator: Pubkey,
+    pub mint: Pubkey,
+    pub redeemer: Pubkey,
     pub secret: [u8; 32],
+    pub swap_amount: u64,
+    pub timelock: u64,
 }
 /// Represents the refund state of the swap, where the initiator has withdrawn funds from the vault past expiry
 #[event]
 pub struct Refunded {
     pub initiator: Pubkey,
+    pub mint: Pubkey,
+    pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    pub swap_amount: u64,
+    pub timelock: u64,
 }
 /// Represents the instant refund state of the swap, where the initiator has withdrawn funds the vault
 /// with the redeemer's consent
 #[event]
 pub struct InstantRefunded {
     pub initiator: Pubkey,
+    pub mint: Pubkey,
+    pub redeemer: Pubkey,
     pub secret_hash: [u8; 32],
+    pub swap_amount: u64,
+    pub timelock: u64,
 }
 
 #[error_code]
