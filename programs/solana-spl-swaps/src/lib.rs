@@ -16,15 +16,15 @@ pub mod solana_spl_swaps {
     /// in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals
     /// must be provided as 1,000,000.  
-    /// `expires_in_slots` represents the number of slots after which (non-instant) refunds are allowed.  
+    /// `timelock` represents the number of slots after which (non-instant) refunds are allowed.  
     /// `destination_data` can hold optional information regarding the destination chain
     /// in the atomic swap, to be emitted in the logs as-is.
     pub fn initiate(
         ctx: Context<Initiate>,
-        expires_in_slots: u64,
         redeemer: Pubkey,
         secret_hash: [u8; 32],
         swap_amount: u64, // In base units of the token
+        timelock: u64,
         destination_data: Option<Vec<u8>>,
     ) -> Result<()> {
         let Initiate {
@@ -48,17 +48,18 @@ pub mod solana_spl_swaps {
         token::transfer(token_transfer_context, swap_amount)?;
 
         *ctx.accounts.swap_data = SwapAccount {
+            expiry_slot: Clock::get()?.slot + timelock,
+            identity_pda_bump: ctx.bumps.identity_pda,
+            rent_sponsor: rent_sponsor.key(),
             initiator: initiator.key(),
-            expiry_slot: Clock::get()?.slot + expires_in_slots,
             redeemer,
             secret_hash,
             swap_amount,
-            identity_pda_bump: ctx.bumps.identity_pda,
-            rent_sponsor: rent_sponsor.key(),
+            timelock,
         };
 
         emit!(Initiated {
-            expires_in_slots,
+            timelock,
             initiator: initiator.key(),
             mint: mint.key(),
             redeemer,
@@ -203,6 +204,13 @@ pub mod solana_spl_swaps {
 pub struct SwapAccount {
     /// The exact slot after which (non-instant) refunds are allowed
     pub expiry_slot: u64,
+    /// The bump associated with the identity pda.
+    /// This is needed by the program to authorize token transfers via the token vault.
+    pub identity_pda_bump: u8,
+    /// The entity that paid the rent fees for the creation of this PDA.
+    /// This will be referenced during the refund of the same upon closing this PDA.
+    pub rent_sponsor: Pubkey,
+
     /// The initiator of the atomic swap
     pub initiator: Pubkey,
     /// The redeemer of the atomic swap
@@ -215,19 +223,15 @@ pub struct SwapAccount {
     /// must be provided as 1,000,000.
     pub swap_amount: u64,
 
-    /// The bump associated with the identity pda.
-    /// This is needed by the program to authorize token transfers via the token vault.
-    pub identity_pda_bump: u8,
-    /// The entity that paid the rent fees for the creation of this PDA.
-    /// This will be referenced during the refund of the same upon closing this PDA.
-    pub rent_sponsor: Pubkey,
+    /// Represents the number of slots after which (non-instant) refunds are allowed
+    pub timelock: u64,
 }
 
 #[derive(Accounts)]
 // The parameters must have the exact name and order as specified in the underlying function
 // to avoid "seed constraint violation" errors.
 // Refer: https://www.anchor-lang.com/docs/references/account-constraints#instruction-attribute
-#[instruction(expires_in_slots: u64, redeemer_token_account: Pubkey, secret_hash: [u8; 32])]
+#[instruction(redeemer: Pubkey, secret_hash: [u8; 32], swap_amount: u64, timelock: u64)]
 pub struct Initiate<'info> {
     /// CHECK: A permanent PDA that represents this swap program for authorizing
     /// the token transfers of the `token_vault` PDA.  
@@ -399,8 +403,8 @@ pub struct Initiated {
     /// The quantity of tokens transferred through this atomic swap in base units of the token mint.  
     /// E.g: A quantity of $1 represented by the token "USDC" with "6" decimals will be represented as 1,000,000.
     pub swap_amount: u64,
-    /// `expires_in_slots` represents the number of slots after which (non-instant) refunds are allowed
-    pub expires_in_slots: u64,
+    /// `timelock` represents the number of slots after which (non-instant) refunds are allowed
+    pub timelock: u64,
     pub initiator: Pubkey,
     pub mint: Pubkey,
     pub redeemer: Pubkey,
@@ -439,6 +443,6 @@ pub enum SwapError {
     #[msg("The provided rent_sponsor is not the original rent_sponsor of this swap")]
     InvalidRentSponsor,
 
-    #[msg("Attempt to perform a refund before expiry time")]
+    #[msg("Attempt to refund before timelock expiry")]
     RefundBeforeExpiry,
 }

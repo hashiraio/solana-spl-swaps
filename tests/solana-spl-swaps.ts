@@ -18,7 +18,7 @@ const program = workspace.SolanaSplSwaps as Program<SolanaSplSwaps>;
 
 describe("Testing one way swap between Alice and Bob", () => {
   const swapAmount = new BN(10);
-  const swapExpiresIn = new BN(2); // 2 slots = 800 ms
+  const timelock = new BN(2); // 2 slots = 800 ms
   const secret: Buffer = crypto.randomBytes(32);
   const secretHash: Buffer = crypto
     .createHash("sha256")
@@ -110,10 +110,10 @@ Sponsor   : ${rentSponsor.publicKey}\n`
   async function aliceInitiate() {
     const signature = await program.methods
       .initiate(
-        swapExpiresIn,
         bob.publicKey,
         [...secretHash],
         swapAmount,
+        timelock,
         destinationData
       )
       .accounts({
@@ -164,9 +164,9 @@ Sponsor   : ${rentSponsor.publicKey}\n`
 
   it("Test refund", async () => {
     await aliceInitiate(); // Re-initiating for this test
-    const expiryMs = swapExpiresIn.toNumber() * 400;
-    console.log(`Awaiting timelock of ${expiryMs}ms for Refund`);
-    await new Promise((r) => setTimeout(r, expiryMs + 1000)); // Add an extra sec
+    const timelockMs = timelock.toNumber() * 400;
+    console.log(`Awaiting timelock of ${timelockMs}ms for Refund`);
+    await new Promise((r) => setTimeout(r, timelockMs + 1000)); // Add an extra sec
     const aliceBalanceBefore = (
       await connection.getTokenAccountBalance(aliceTokenAccount)
     ).value.uiAmount;
