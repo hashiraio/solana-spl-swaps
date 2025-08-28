@@ -2047,7 +2047,7 @@ dependencies = [
 
 [[package]]
 name = "solana-spl-swaps"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
