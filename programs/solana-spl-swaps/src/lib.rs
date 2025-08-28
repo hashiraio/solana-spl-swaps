@@ -364,11 +364,11 @@ pub struct Redeem<'info> {
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
-    #[account(mut, token::authority = identity_pda)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
     /// CHECK: The token account of the redeemer
-    #[account(mut, token::authority = swap_data.redeemer)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = swap_data.redeemer)]
     pub redeemer_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Rent sponsor's address for refunding PDA rent
@@ -401,11 +401,11 @@ pub struct Refund<'info> {
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
-    #[account(mut, token::authority = identity_pda)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
     /// CHECK: The token account of the refundee
-    #[account(mut, token::authority = swap_data.refundee)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = swap_data.refundee)]
     pub refundee_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Rent sponsor's address for refunding PDA rent
@@ -438,11 +438,11 @@ pub struct InstantRefund<'info> {
     pub swap_data: Account<'info, SwapAccount>,
 
     /// A token account controlled by the program, escrowing the tokens for this atomic swap
-    #[account(mut, token::authority = identity_pda)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = identity_pda)]
     pub token_vault: Account<'info, TokenAccount>,
 
     /// CHECK: The token account of the refundee
-    #[account(mut, token::authority = swap_data.refundee)]
+    #[account(mut, token::mint = swap_data.mint, token::authority = swap_data.refundee)]
     pub refundee_token_account: Account<'info, TokenAccount>,
 
     /// The redeemer of the atomic swap. They must sign this transaction.
