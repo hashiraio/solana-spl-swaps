@@ -48,8 +48,12 @@ pub mod solana_spl_swaps {
         );
         token::transfer(token_transfer_context, swap_amount)?;
 
+        let expiry_slot = Clock::get()?
+            .slot
+            .checked_add(timelock)
+            .expect("timelock should not cause an overflow");
         *ctx.accounts.swap_data = SwapAccount {
-            expiry_slot: Clock::get()?.slot + timelock,
+            expiry_slot,
             bump: ctx.bumps.swap_data,
             identity_pda_bump: ctx.bumps.identity_pda,
             rent_sponsor: rent_sponsor.key(),
