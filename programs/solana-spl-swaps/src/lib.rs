@@ -268,16 +268,10 @@ pub struct SwapAccount {
 // Refer: https://www.anchor-lang.com/docs/references/account-constraints#instruction-attribute
 #[instruction(redeemer: Pubkey, refundee: Pubkey, secret_hash: [u8; 32], swap_amount: u64, timelock: u64)]
 pub struct Initiate<'info> {
-    /// CHECK: A permanent PDA that represents this swap program for authorizing
-    /// the token transfers of the `token_vault` PDA.  
-    /// This PDA will be created during the first most invocation of the `initiate()` function
-    /// using the `init_if_needed` attribute, and be reused for all succeeding instructions.
+    /// CHECK: Program-derived address used solely as signing authority (no data allocation)
     #[account(
-        init_if_needed,
-        payer = rent_sponsor,
         seeds = [],
         bump,
-        space = ANCHOR_DISCRIMINATOR,
     )]
     pub identity_pda: AccountInfo<'info>,
 
@@ -290,6 +284,7 @@ pub struct Initiate<'info> {
         seeds = [
             redeemer.as_ref(),
             refundee.as_ref(),
+            mint.key().as_ref(),
             &secret_hash,
             &swap_amount.to_le_bytes(),
             &timelock.to_le_bytes(),
@@ -354,6 +349,7 @@ pub struct Redeem<'info> {
         seeds = [
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
+            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -391,6 +387,7 @@ pub struct Refund<'info> {
         seeds = [
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
+            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -428,6 +425,7 @@ pub struct InstantRefund<'info> {
         seeds = [
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
+            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),

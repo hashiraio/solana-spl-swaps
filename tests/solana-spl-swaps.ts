@@ -48,6 +48,7 @@ describe("Testing one way swap between Alice and Bob", () => {
     [
       bob.publicKey.toBuffer(),
       alice.publicKey.toBuffer(),
+      mint.publicKey.toBuffer(),
       secretHash,
       swapAmount.toArrayLike(Buffer, "le", 8),
       timelock.toArrayLike(Buffer, "le", 8),
