@@ -269,10 +269,7 @@ pub struct SwapAccount {
 #[instruction(redeemer: Pubkey, refundee: Pubkey, secret_hash: [u8; 32], swap_amount: u64, timelock: u64)]
 pub struct Initiate<'info> {
     /// CHECK: Program-derived address used solely as signing authority (no data allocation)
-    #[account(
-        seeds = [],
-        bump,
-    )]
+    #[account(seeds = [], bump)]
     pub identity_pda: AccountInfo<'info>,
 
     /// A PDA that maintains the on-chain state of the atomic swap throughout its lifecycle.
@@ -282,9 +279,9 @@ pub struct Initiate<'info> {
         init,
         payer = rent_sponsor,
         seeds = [
+            mint.key().as_ref(),
             redeemer.as_ref(),
             refundee.as_ref(),
-            mint.key().as_ref(),
             &secret_hash,
             &swap_amount.to_le_bytes(),
             &timelock.to_le_bytes(),
@@ -347,9 +344,9 @@ pub struct Redeem<'info> {
     #[account(
         mut,
         seeds = [
+            swap_data.mint.as_ref(),
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
-            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -385,9 +382,9 @@ pub struct Refund<'info> {
     #[account(
         mut,
         seeds = [
+            swap_data.mint.as_ref(),
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
-            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
@@ -423,9 +420,9 @@ pub struct InstantRefund<'info> {
     #[account(
         mut,
         seeds = [
+            swap_data.mint.as_ref(),
             swap_data.redeemer.as_ref(),
             swap_data.refundee.as_ref(),
-            swap_data.mint.as_ref(),
             &swap_data.secret_hash,
             &swap_data.swap_amount.to_le_bytes(),
             &swap_data.timelock.to_le_bytes(),
