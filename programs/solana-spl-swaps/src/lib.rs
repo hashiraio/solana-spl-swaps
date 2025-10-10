@@ -227,6 +227,211 @@ pub mod solana_spl_swaps {
 
         Ok(())
     }
+
+    // ============ UDA Logic ============
+
+    /// Create an SPL token Unique Deposit Address
+    /// 
+    /// Creates a UDA for SPL token transfers with a token vault and destination data.
+    /// 
+    /// # Arguments
+    /// * `ctx` - Context containing all required accounts including token vault
+    /// * `mint` - SPL token mint address
+    /// * `refund_address` - Address to receive tokens if the UDA expires
+    /// * `redeemer` - Address authorized to redeem the UDA
+    /// * `timelock` - Slot number when the UDA expires
+    /// * `secret_hash` - Hash of the secret required for redemption
+    /// * `amount` - Amount of tokens to lock in the vault
+    /// * `destination_data` - Cross-chain routing data
+    /// 
+    /// # Returns
+    /// * `Result<Pubkey>` - The token vault address where tokens should be sent
+    /// 
+    /// # Errors
+    /// * `ZeroAmount` - If amount is zero
+    /// * `SameAddress` - If refund_address equals redeemer
+    /// * `InvalidAddress` - If any address is the default pubkey
+    /// * `InvalidMint` - If mint is the default pubkey
+    /// * `InvalidHTLCProgram` - If HTLC program is not registered for this mint
+    /// * `InvalidSecretHash` - If secret hash is all zeros or destination hash mismatch
+    pub fn create_uda_spl(
+        ctx: Context<CreateSPLUDA>,
+        mint: Pubkey,
+        refund_address: Pubkey,
+        redeemer: Pubkey,
+        timelock: u64,
+        secret_hash: [u8; 32],
+        amount: u64,
+        destination_data: Vec<u8>,
+        destination_hash: [u8; 32]
+    ) -> Result<Pubkey> {
+        require!(amount > 0, UDAError::ZeroAmount);
+        require!(refund_address != redeemer, UDAError::SameAddress);
+        require!(refund_address != Pubkey::default(), UDAError::InvalidAddress);
+        require!(redeemer != Pubkey::default(), UDAError::InvalidAddress);
+        require!(mint != Pubkey::default(), UDAError::InvalidMint);
+        require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
+
+        let computed_hash = hash::hash(&destination_data).to_bytes();
+        require!(destination_hash == computed_hash, UDAError::DestinationHashMismatchComputedHash);
+
+        let uda = &mut ctx.accounts.uda;
+        require!(uda.key() != redeemer, UDAError::SameAddress);
+
+        uda.mint = mint;
+        uda.refund_address = refund_address;
+        uda.redeemer = redeemer;
+        uda.timelock = timelock;
+        uda.secret_hash = secret_hash;
+        uda.amount = amount;
+        uda.vault_address = ctx.accounts.token_vault.key();
+        uda.created_at = Clock::get()?.slot;
+        uda.rent_sponsor = ctx.accounts.payer.key();
+        uda.destination_data = destination_data.clone();
+        uda.destination_hash = destination_hash;
+
+        emit!(SPLUDACreated {
+            uda_address: uda.key(),
+            vault_address: ctx.accounts.token_vault.key(),
+            refund_address: uda.refund_address,
+            amount: uda.amount,
+            timelock: uda.timelock,
+        });
+
+        Ok(ctx.accounts.token_vault.key())
+    }
+
+    /// Initiate Hash Time Lock Contract for an SPL token UDA
+    /// 
+    /// Creates and executes an HTLC instruction on the registered HTLC program
+    /// for SPL token transfers. After initiation, transfers any excess tokens to 
+    /// the refund token account and closes the UDA account, returning rent to the sponsor.
+    /// The stored destination_data is passed to the HTLC program for cross-chain routing.
+    /// 
+    /// # Arguments
+    /// * `ctx` - Context containing UDA, token accounts, HTLC program, and cleanup accounts
+    /// 
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    /// 
+    /// # Errors
+    /// * `InvalidState` - If UDA is not in Created state
+    /// * `InvalidTimelock` - If timelock is zero
+    /// * `InvalidHTLCProgram` - If HTLC program doesn't match UDA registration
+    /// * `InvalidMint` - If token mint doesn't match UDA mint
+    /// * `InsufficientFunds` - If token vault doesn't have enough tokens
+    pub fn initiate_htlc_spl(ctx: Context<InitiateHtlcSpl>) -> Result<()> {
+        let uda = &mut ctx.accounts.uda;
+
+        require!(uda.timelock > 0, UDAError::InvalidTimelock);
+
+        require!(
+            ctx.accounts.mint_account.key() == uda.mint,
+            UDAError::InvalidMint
+        );
+
+        require!(
+            ctx.accounts.token_vault.amount >= uda.amount,
+            UDAError::InsufficientFunds
+        );
+
+        let current_slot = Clock::get()?.slot;
+    // For UDA path we expect uda.timelock to already be an absolute slot (expiry)
+    if current_slot > uda.timelock { return err!(UDAError::Expired); }
+
+        // Store values we need before creating signer seeds
+        let mint = uda.mint;
+        let refund_address = uda.refund_address;
+        let redeemer = uda.redeemer;
+        let secret_hash = uda.secret_hash;
+        let amount = uda.amount;
+        let timelock = uda.timelock;
+        let destination_hash = uda.destination_hash;
+
+        // UDA signer seeds (authority over the pre-init vault holding initial funds)
+        let uda_signer_seeds: &[&[&[u8]]] = &[&[
+            b"spl_uda",
+            mint.as_ref(),
+            refund_address.as_ref(),
+            redeemer.as_ref(),
+            &secret_hash,
+            &amount.to_le_bytes(),
+            &timelock.to_le_bytes(),
+            &destination_hash,
+        ]];
+
+        // Transfer the exact swap amount from the UDA's staging vault into the uniquely derived HTLC vault
+        let transfer_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::Transfer {
+                from: ctx.accounts.token_vault.to_account_info(),      // UDA staging vault
+                to: ctx.accounts.spl_token_vault.to_account_info(),    // Per-UDA HTLC vault
+                authority: uda.to_account_info(),                      // UDA PDA authority
+            },
+            uda_signer_seeds,
+        );
+    token::transfer(transfer_ctx, amount)?;
+
+        // Initialize the swap data account (created in this instruction via Init constraint)
+        // For UDA path we store absolute timelock (same as expiry_slot) to keep seeds deterministic.
+        *ctx.accounts.swap_data = SwapAccount {
+            expiry_slot: timelock, // absolute expiry slot
+            bump: ctx.bumps.swap_data,
+            identity_pda_bump: ctx.bumps.identity_pda,
+            rent_sponsor: ctx.accounts.rent_sponsor.key(),
+            mint,
+            redeemer,
+            refundee: refund_address,
+            secret_hash,
+            swap_amount: amount,
+            timelock, // absolute (differs from standard initiate which stores relative)
+        };
+
+        // After moving the required amount, send any residual balance in the staging vault back to the refund address
+        ctx.accounts.token_vault.reload()?;
+        let residual = ctx.accounts.token_vault.amount;
+        if residual > 0 {
+            let residual_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.token_vault.to_account_info(),
+                    to: ctx.accounts.refund_token_account.to_account_info(),
+                    authority: uda.to_account_info(),
+                },
+                uda_signer_seeds,
+            );
+            token::transfer(residual_ctx, residual)?;
+        }
+
+        uda.initiated_at = Some(Clock::get()?.slot);
+
+        emit!(HTLCInitiated {
+            uda_address: uda.key(),
+            htlc_program: uda.htlc_program,
+            swap_amount: uda.amount,
+            timelock: uda.timelock,
+        });
+
+        Ok(())
+    }
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct SPLUDA {
+    pub mint: Pubkey,
+    pub refund_address: Pubkey,
+    pub redeemer: Pubkey,
+    pub timelock: u64,
+    pub secret_hash: [u8; 32],
+    pub amount: u64,
+    pub htlc_program: Pubkey,
+    pub vault_address: Pubkey,
+    pub created_at: u64,        // Slot when UDA was created (0 = not created, >0 = created)
+    pub rent_sponsor: Pubkey, // Who paid for UDA creation (gets rent back)
+    #[max_len(10240)]  // Large limit - user pays for storage
+    pub destination_data: Vec<u8>, // Destination data for cross-chain/routing purposes
+    pub destination_hash: [u8; 32],  // SHA256 hash of destination_data for PDA seeds
 }
 
 /// Stores the state information of the atomic swap on-chain
@@ -451,6 +656,153 @@ pub struct InstantRefund<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+#[instruction(
+    mint: Pubkey,
+    refund_address: Pubkey,
+    redeemer: Pubkey,
+    timelock: u64,
+    secret_hash: [u8; 32],
+    amount: u64,
+    destination_hash: [u8; 32]
+)]
+pub struct CreateSPLUDA<'info> {
+    #[account(
+        init,
+        payer = payer,
+        seeds = [
+            b"spl_uda",
+            mint.as_ref(),
+            refund_address.as_ref(),
+            redeemer.as_ref(),
+            &secret_hash,
+            &amount.to_le_bytes(),
+            &timelock.to_le_bytes(),
+            &destination_hash
+        ],
+        bump,
+        space = SPLUDA::INIT_SPACE,
+    )]
+    pub uda: Account<'info, SPLUDA>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        seeds = [
+            b"token_vault",
+            mint.key().as_ref(),
+            uda.key().as_ref()
+        ],
+        bump,
+        token::mint = mint_account,
+        token::authority = uda,
+    )]
+    pub token_vault: Account<'info, TokenAccount>,
+
+    pub mint_account: Account<'info, Mint>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct InitiateHtlcSpl<'info> {
+    #[account(
+        mut,
+        close = rent_sponsor,
+        seeds = [
+            b"spl_uda",
+            uda.mint.as_ref(),
+            uda.refund_address.as_ref(),
+            uda.redeemer.as_ref(),
+            &uda.secret_hash,
+            &uda.amount.to_le_bytes(),
+            &uda.timelock.to_le_bytes(),
+            uda.htlc_program.as_ref(),
+            &uda.destination_hash,
+        ],
+        bump,
+    )]
+    pub uda: Account<'info, SPLUDA>,
+
+    #[account(
+        mut,
+        close = rent_sponsor,
+        seeds = [
+            b"token_vault",
+            uda.mint.as_ref(),
+            uda.key().as_ref(),
+        ],
+        bump,
+        token::mint = uda.mint,
+        token::authority = uda,
+    )]
+    pub token_vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        token::mint = uda.mint,
+        token::authority = uda.refund_address,
+    )]
+    pub refund_token_account: Account<'info, TokenAccount>,
+
+    /// CHECK: Validated against stored refund_address - receives excess SOL
+    #[account(
+        mut,
+        address = uda.refund_address
+    )]
+    pub refund_address: AccountInfo<'info>,
+
+    /// CHECK: Validated against stored rent_sponsor - receives rent back (and pays for new accounts)
+    #[account(mut, address = uda.rent_sponsor)]
+    pub rent_sponsor: Signer<'info>,
+
+    /// Identity PDA reused from standard initiate flow (created once, empty seed array)
+    #[account(
+        init_if_needed,
+        payer = rent_sponsor,
+        seeds = [],
+        bump,
+        space = ANCHOR_DISCRIMINATOR,
+    )]
+    pub identity_pda: AccountInfo<'info>,
+
+    /// Swap data account (created here to mirror standard initiate flow) storing absolute timelock
+    #[account(
+        init,
+        payer = rent_sponsor,
+        seeds = [
+            uda.redeemer.as_ref(),
+            uda.refund_address.as_ref(),
+            &uda.secret_hash,
+            &uda.amount.to_le_bytes(),
+            &uda.timelock.to_le_bytes(),
+        ],
+        bump,
+        space = ANCHOR_DISCRIMINATOR + SwapAccount::INIT_SPACE,
+    )]
+    pub swap_data: Account<'info, SwapAccount>,
+
+    /// Per-UDA HTLC vault that actually escrows the swap amount (unique per UDA)
+    #[account(
+        init,
+        payer = rent_sponsor,
+        seeds = [b"htlc_vault", uda.key().as_ref()],
+        bump,
+        token::mint = mint_account,
+        token::authority = identity_pda,
+    )]
+    pub spl_token_vault: Account<'info, TokenAccount>,
+
+    pub mint_account: Account<'info, Mint>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
 /// Represents the initiated state of the swap where the funder has deposited funds into the vault
 #[event]
 pub struct Initiated {
@@ -498,6 +850,23 @@ pub struct InstantRefunded {
     pub timelock: u64,
 }
 
+#[event]
+pub struct SPLUDACreated {
+    pub uda_address: Pubkey,
+    pub vault_address: Pubkey,
+    pub refund_address: Pubkey,
+    pub amount: u64,
+    pub timelock: u64,
+}
+
+#[event]
+pub struct HTLCInitiated {
+    pub uda_address: Pubkey,
+    pub htlc_program: Pubkey,
+    pub swap_amount: u64,
+    pub timelock: u64,
+}
+
 #[error_code]
 pub enum SwapError {
     #[msg("The provider redeemer is not the original redeemer of this swap")]
@@ -511,4 +880,52 @@ pub enum SwapError {
 
     #[msg("Attempt to refund before timelock expiry")]
     RefundBeforeExpiry,
+}
+
+#[error_code]
+pub enum UDAError {
+    #[msg("Invalid timelock - must be greater than zero")]
+    InvalidTimelock,
+
+    #[msg("Amount cannot be zero")]
+    ZeroAmount,
+
+    #[msg("Invalid address - cannot be zero address")]
+    InvalidAddress,
+
+    #[msg("Refund address and redeemer cannot be the same")]
+    SameAddress,
+
+    #[msg("Invalid UDA state for this operation")]
+    InvalidState,
+
+    #[msg("UDA has expired")]
+    Expired,
+
+    #[msg("Insufficient funds in UDA")]
+    InsufficientFunds,
+
+    #[msg("Invalid refund address")]
+    InvalidRefundAddress,
+
+    #[msg("Invalid HTLC program address")]
+    InvalidHTLCProgram,
+
+    #[msg("Invalid secret hash - cannot be zero")]
+    InvalidSecretHash,
+
+    #[msg("Invalid mint address")]
+    InvalidMint,
+
+    #[msg("Unauthorized operation")]
+    Unauthorized,
+    
+    #[msg("Token already registered")]
+    TokenAlreadyRegistered,
+
+    #[msg("Invalid destination data provided")]
+    InvalidDestinationData,
+
+    #[msg("Destination hash does not match destination data")]
+    DestinationHashMismatchComputedHash,
 }
