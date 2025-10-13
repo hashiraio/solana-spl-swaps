@@ -326,7 +326,9 @@ pub mod solana_spl_swaps {
         let uda = &mut ctx.accounts.uda;
 
         require!(
-            ctx.accounts.mint_account.key() == uda.mint || ctx.accounts.token_vault.mint == uda.mint,
+            ctx.accounts.mint_account.key() == uda.mint && 
+            ctx.accounts.token_vault.mint == uda.mint && 
+            ctx.accounts.refund_token_account.key() == uda.mint,
             UDAError::InvalidMint
         );
 
@@ -357,15 +359,14 @@ pub mod solana_spl_swaps {
         ]];
 
         // Transfer the exact swap amount from the UDA's staging vault into the HTLC vault
-        let transfer_ctx = CpiContext::new_with_signer(
+        let transfer_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token::Transfer {
                 from: ctx.accounts.token_vault.to_account_info(),      // UDA staging vault
                 to: ctx.accounts.spl_token_vault.to_account_info(),    // HTLC vault
                 authority: uda.to_account_info(),                      // UDA PDA authority
             },
-            uda_signer_seeds,
-        );
+        ); // @audit-ok
         token::transfer(transfer_ctx, amount)?;
 
         let expiry_slot = Clock::get()?
@@ -392,14 +393,13 @@ pub mod solana_spl_swaps {
         ctx.accounts.token_vault.reload()?;
         let residual = ctx.accounts.token_vault.amount;
         if residual > 0 {
-            let residual_ctx = CpiContext::new_with_signer(
+            let residual_ctx = CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 token::Transfer {
                     from: ctx.accounts.token_vault.to_account_info(),
                     to: ctx.accounts.refund_token_account.to_account_info(),
                     authority: uda.to_account_info(),
                 },
-                uda_signer_seeds,
             );
             token::transfer(residual_ctx, residual)?;
         }
@@ -408,6 +408,16 @@ pub mod solana_spl_swaps {
             uda_address: uda.key(),
             swap_amount: uda.amount,
             timelock: uda.timelock,
+        });
+
+        emit!(Initiated {
+            mint: uda.mint,
+            redeemer,
+            refundee: refund_address,
+            secret_hash,
+            swap_amount: amount,
+            timelock,
+            destination_data: Some(uda.destination_data.clone())
         });
 
         Ok(())
@@ -757,13 +767,7 @@ pub struct InitiateUDA<'info> {
     pub rent_sponsor: Signer<'info>,
 
     /// Identity PDA reused from standard initiate flow (created once, empty seed array)
-    #[account(
-        init_if_needed,
-        payer = rent_sponsor,
-        seeds = [],
-        bump,
-        space = ANCHOR_DISCRIMINATOR,
-    )]
+    #[account(seeds = [], bump = swap_data.identity_pda_bump)]
     pub identity_pda: AccountInfo<'info>,
 
     /// Swap data account (created here to mirror standard initiate flow) storing absolute timelock
@@ -771,6 +775,7 @@ pub struct InitiateUDA<'info> {
         init,
         payer = rent_sponsor,
         seeds = [
+            uda.mint.as_ref(),
             uda.redeemer.as_ref(),
             uda.refund_address.as_ref(),
             &uda.secret_hash,
