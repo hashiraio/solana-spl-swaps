@@ -231,9 +231,9 @@ pub mod solana_spl_swaps {
     // ============ UDA Logic ============
 
     /// Create an SPL token Unique Deposit Address
-    /// 
+    ///
     /// Creates a UDA for SPL token transfers with a token vault and destination data.
-    /// 
+    ///
     /// # Arguments
     /// * `ctx` - Context containing all required accounts including token vault
     /// * `mint` - SPL token mint address
@@ -243,17 +243,16 @@ pub mod solana_spl_swaps {
     /// * `secret_hash` - Hash of the secret required for redemption
     /// * `amount` - Amount of tokens to lock in the vault
     /// * `destination_data` - Cross-chain routing data
-    /// 
+    ///
     /// # Returns
     /// * `Result<Pubkey>` - The token vault address where tokens should be sent
-    /// 
+    ///
     /// # Errors
-    /// * `ZeroAmount` - If amount is zero
     /// * `SameAddress` - If refund_address equals redeemer
     /// * `InvalidAddress` - If any address is the default pubkey
     /// * `InvalidMint` - If mint is the default pubkey
-    /// * `InvalidHTLCProgram` - If HTLC program is not registered for this mint
     /// * `InvalidSecretHash` - If secret hash is all zeros or destination hash mismatch
+    /// * `DestinationHashMismatchComputedHash` - If destination_hash doesn't match sha256(destination_data)
     pub fn create_uda_spl(
         ctx: Context<CreateSPLUDA>,
         mint: Pubkey,
@@ -263,20 +262,29 @@ pub mod solana_spl_swaps {
         secret_hash: [u8; 32],
         amount: u64,
         destination_data: Vec<u8>,
-        destination_hash: [u8; 32]
+        destination_hash: [u8; 32],
     ) -> Result<Pubkey> {
         require!(refund_address != redeemer, UDAError::SameAddress);
-        require!(refund_address != Pubkey::default(), UDAError::InvalidAddress);
+        require!(
+            refund_address != Pubkey::default(),
+            UDAError::InvalidAddress
+        );
         require!(redeemer != Pubkey::default(), UDAError::InvalidAddress);
         require!(mint != Pubkey::default(), UDAError::InvalidMint);
         require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
 
         let computed_hash = hash::hash(&destination_data).to_bytes();
-        require!(destination_hash == computed_hash, UDAError::DestinationHashMismatchComputedHash);
+        require!(
+            destination_hash == computed_hash,
+            UDAError::DestinationHashMismatchComputedHash
+        );
 
         let uda = &mut ctx.accounts.uda;
         require!(uda.key() != redeemer, UDAError::SameAddress);
-        require!(ctx.accounts.mint_account.key() == mint, UDAError::InvalidMint);
+        require!(
+            ctx.accounts.mint_account.key() == mint,
+            UDAError::InvalidMint
+        );
 
         uda.mint = mint;
         uda.refund_address = refund_address;
@@ -303,31 +311,28 @@ pub mod solana_spl_swaps {
     }
 
     /// Initiate Hash Time Lock Contract for an SPL token UDA
-    /// 
+    ///
     /// Creates and executes an HTLC instruction on the registered HTLC program
-    /// for SPL token transfers. After initiation, transfers any excess tokens to 
+    /// for SPL token transfers. After initiation, transfers any excess tokens to
     /// the refund token account and closes the UDA account, returning rent to the sponsor.
     /// The stored destination_data is passed to the HTLC program for cross-chain routing.
-    /// 
+    ///
     /// # Arguments
     /// * `ctx` - Context containing UDA, token accounts, HTLC program, and cleanup accounts
-    /// 
+    ///
     /// # Returns
     /// * `Result<()>` - Success or error
-    /// 
+    ///
     /// # Errors
-    /// * `InvalidState` - If UDA is not in Created state
-    /// * `InvalidTimelock` - If timelock is zero
-    /// * `InvalidHTLCProgram` - If HTLC program doesn't match UDA registration
     /// * `InvalidMint` - If token mint doesn't match UDA mint
     /// * `InsufficientFunds` - If token vault doesn't have enough tokens
     pub fn initiate_uda(ctx: Context<InitiateUDA>) -> Result<()> {
         let uda = &mut ctx.accounts.uda;
 
         require!(
-            ctx.accounts.mint_account.key() == uda.mint && 
-            ctx.accounts.uda_token_vault.mint == uda.mint && 
-            ctx.accounts.refund_token_account.key() == uda.mint,
+            ctx.accounts.mint_account.key() == uda.mint
+                && ctx.accounts.uda_token_vault.mint == uda.mint
+                && ctx.accounts.refund_token_account.key() == uda.mint,
             UDAError::InvalidMint
         );
 
@@ -348,9 +353,9 @@ pub mod solana_spl_swaps {
         let transfer_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
             token::Transfer {
-                from: ctx.accounts.uda_token_vault.to_account_info(),      // UDA staging vault
-                to: ctx.accounts.token_vault.to_account_info(),            // HTLC vault
-                authority: uda.to_account_info(),                          // UDA PDA authority
+                from: ctx.accounts.uda_token_vault.to_account_info(), // UDA staging vault
+                to: ctx.accounts.token_vault.to_account_info(),       // HTLC vault
+                authority: uda.to_account_info(),                     // UDA PDA authority
             },
         );
         token::transfer(transfer_ctx, amount)?;
@@ -420,12 +425,12 @@ pub struct SPLUDA {
     pub secret_hash: [u8; 32],
     pub amount: u64,
     pub vault_address: Pubkey,
-    pub created_at: u64,        // Slot when UDA was created (0 = not created, >0 = created)
+    pub created_at: u64, // Slot when UDA was created (0 = not created, >0 = created)
     pub rent_sponsor: Pubkey, // Who paid for UDA creation (gets rent back)
-    #[max_len(1024)]  // Large limit - user pays for storage
+    #[max_len(1024)] // Large limit - user pays for storage
     pub destination_data: Vec<u8>, // Destination data for cross-chain/routing purposes
-    pub destination_hash: [u8; 32],  // SHA256 hash of destination_data for PDA seeds
-    pub identity_pda_bump: u8
+    pub destination_hash: [u8; 32], // SHA256 hash of destination_data for PDA seeds
+    pub identity_pda_bump: u8,
 }
 
 /// Stores the state information of the atomic swap on-chain
@@ -874,47 +879,20 @@ pub enum SwapError {
 
 #[error_code]
 pub enum UDAError {
-    #[msg("Invalid timelock - must be greater than zero")]
-    InvalidTimelock,
-
-    #[msg("Amount cannot be zero")]
-    ZeroAmount,
-
     #[msg("Invalid address - cannot be zero address")]
     InvalidAddress,
 
     #[msg("Refund address and redeemer cannot be the same")]
     SameAddress,
 
-    #[msg("Invalid UDA state for this operation")]
-    InvalidState,
-
-    #[msg("UDA has expired")]
-    Expired,
-
     #[msg("Insufficient funds in UDA")]
     InsufficientFunds,
-
-    #[msg("Invalid refund address")]
-    InvalidRefundAddress,
-
-    #[msg("Invalid HTLC program address")]
-    InvalidHTLCProgram,
 
     #[msg("Invalid secret hash - cannot be zero")]
     InvalidSecretHash,
 
     #[msg("Invalid mint address")]
     InvalidMint,
-
-    #[msg("Unauthorized operation")]
-    Unauthorized,
-    
-    #[msg("Token already registered")]
-    TokenAlreadyRegistered,
-
-    #[msg("Invalid destination data provided")]
-    InvalidDestinationData,
 
     #[msg("Destination hash does not match destination data")]
     DestinationHashMismatchComputedHash,
