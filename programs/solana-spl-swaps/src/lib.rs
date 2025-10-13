@@ -265,6 +265,7 @@ pub mod solana_spl_swaps {
         destination_data: Vec<u8>,
         destination_hash: [u8; 32]
     ) -> Result<Pubkey> {
+        require!(timelock > 0, UDAError::InvalidTimelock);
         require!(amount > 0, UDAError::ZeroAmount);
         require!(refund_address != redeemer, UDAError::SameAddress);
         require!(refund_address != Pubkey::default(), UDAError::InvalidAddress);
@@ -277,6 +278,7 @@ pub mod solana_spl_swaps {
 
         let uda = &mut ctx.accounts.uda;
         require!(uda.key() != redeemer, UDAError::SameAddress);
+        require!(ctx.accounts.mint_account.key() == mint, UDAError::InvalidMint);
 
         uda.mint = mint;
         uda.refund_address = refund_address;
@@ -320,13 +322,11 @@ pub mod solana_spl_swaps {
     /// * `InvalidHTLCProgram` - If HTLC program doesn't match UDA registration
     /// * `InvalidMint` - If token mint doesn't match UDA mint
     /// * `InsufficientFunds` - If token vault doesn't have enough tokens
-    pub fn initiate_htlc_spl(ctx: Context<InitiateHtlcSpl>) -> Result<()> {
+    pub fn initiate_uda(ctx: Context<InitiateUDA>) -> Result<()> {
         let uda = &mut ctx.accounts.uda;
 
-        require!(uda.timelock > 0, UDAError::InvalidTimelock);
-
         require!(
-            ctx.accounts.mint_account.key() == uda.mint,
+            ctx.accounts.mint_account.key() == uda.mint || ctx.accounts.token_vault.mint == uda.mint,
             UDAError::InvalidMint
         );
 
@@ -334,10 +334,6 @@ pub mod solana_spl_swaps {
             ctx.accounts.token_vault.amount >= uda.amount,
             UDAError::InsufficientFunds
         );
-
-        let current_slot = Clock::get()?.slot;
-    // For UDA path we expect uda.timelock to already be an absolute slot (expiry)
-    if current_slot > uda.timelock { return err!(UDAError::Expired); }
 
         // Store values we need before creating signer seeds
         let mint = uda.mint;
@@ -360,22 +356,27 @@ pub mod solana_spl_swaps {
             &destination_hash,
         ]];
 
-        // Transfer the exact swap amount from the UDA's staging vault into the uniquely derived HTLC vault
+        // Transfer the exact swap amount from the UDA's staging vault into the HTLC vault
         let transfer_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             token::Transfer {
                 from: ctx.accounts.token_vault.to_account_info(),      // UDA staging vault
-                to: ctx.accounts.spl_token_vault.to_account_info(),    // Per-UDA HTLC vault
+                to: ctx.accounts.spl_token_vault.to_account_info(),    // HTLC vault
                 authority: uda.to_account_info(),                      // UDA PDA authority
             },
             uda_signer_seeds,
         );
-    token::transfer(transfer_ctx, amount)?;
+        token::transfer(transfer_ctx, amount)?;
+
+        let expiry_slot = Clock::get()?
+            .slot
+            .checked_add(timelock)
+            .expect("timelock should not cause an overflow");
 
         // Initialize the swap data account (created in this instruction via Init constraint)
         // For UDA path we store absolute timelock (same as expiry_slot) to keep seeds deterministic.
         *ctx.accounts.swap_data = SwapAccount {
-            expiry_slot: timelock, // absolute expiry slot
+            expiry_slot,
             bump: ctx.bumps.swap_data,
             identity_pda_bump: ctx.bumps.identity_pda,
             rent_sponsor: ctx.accounts.rent_sponsor.key(),
@@ -403,11 +404,8 @@ pub mod solana_spl_swaps {
             token::transfer(residual_ctx, residual)?;
         }
 
-        uda.initiated_at = Some(Clock::get()?.slot);
-
         emit!(HTLCInitiated {
             uda_address: uda.key(),
-            htlc_program: uda.htlc_program,
             swap_amount: uda.amount,
             timelock: uda.timelock,
         });
@@ -425,11 +423,10 @@ pub struct SPLUDA {
     pub timelock: u64,
     pub secret_hash: [u8; 32],
     pub amount: u64,
-    pub htlc_program: Pubkey,
     pub vault_address: Pubkey,
     pub created_at: u64,        // Slot when UDA was created (0 = not created, >0 = created)
     pub rent_sponsor: Pubkey, // Who paid for UDA creation (gets rent back)
-    #[max_len(10240)]  // Large limit - user pays for storage
+    #[max_len(1024)]  // Large limit - user pays for storage
     pub destination_data: Vec<u8>, // Destination data for cross-chain/routing purposes
     pub destination_hash: [u8; 32],  // SHA256 hash of destination_data for PDA seeds
 }
@@ -709,7 +706,7 @@ pub struct CreateSPLUDA<'info> {
 }
 
 #[derive(Accounts)]
-pub struct InitiateHtlcSpl<'info> {
+pub struct InitiateUDA<'info> {
     #[account(
         mut,
         close = rent_sponsor,
@@ -721,7 +718,6 @@ pub struct InitiateHtlcSpl<'info> {
             &uda.secret_hash,
             &uda.amount.to_le_bytes(),
             &uda.timelock.to_le_bytes(),
-            uda.htlc_program.as_ref(),
             &uda.destination_hash,
         ],
         bump,
@@ -786,11 +782,11 @@ pub struct InitiateHtlcSpl<'info> {
     )]
     pub swap_data: Account<'info, SwapAccount>,
 
-    /// Per-UDA HTLC vault that actually escrows the swap amount (unique per UDA)
+    /// Standard HTLC token vault (shared across swaps for same mint, matches Initiate struct)
     #[account(
-        init,
+        init_if_needed,
         payer = rent_sponsor,
-        seeds = [b"htlc_vault", uda.key().as_ref()],
+        seeds = [mint_account.key().as_ref()],
         bump,
         token::mint = mint_account,
         token::authority = identity_pda,
@@ -862,7 +858,6 @@ pub struct SPLUDACreated {
 #[event]
 pub struct HTLCInitiated {
     pub uda_address: Pubkey,
-    pub htlc_program: Pubkey,
     pub swap_amount: u64,
     pub timelock: u64,
 }
