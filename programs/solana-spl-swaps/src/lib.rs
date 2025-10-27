@@ -253,50 +253,37 @@ pub mod solana_spl_swaps {
     /// * `InvalidMint` - If mint is the default pubkey
     /// * `InvalidSecretHash` - If secret hash is all zeros or destination hash mismatch
     /// * `DestinationHashMismatchComputedHash` - If destination_hash doesn't match sha256(destination_data)
-    pub fn create_uda_spl(
+    pub fn create_spl_uda(
         ctx: Context<CreateSPLUDA>,
-        mint: Pubkey,
-        refund_address: Pubkey,
-        redeemer: Pubkey,
-        timelock: u64,
-        secret_hash: [u8; 32],
-        amount: u64,
-        destination_data: Vec<u8>,
-        destination_hash: [u8; 32],
+        params: CreateSPLUDAParams,
     ) -> Result<Pubkey> {
-        require!(refund_address != redeemer, UDAError::SameAddress);
+        require!(params.refund_address != params.redeemer, UDAError::SameAddress);
         require!(
-            refund_address != Pubkey::default(),
+            params.refund_address != Pubkey::default(),
             UDAError::InvalidAddress
         );
-        require!(redeemer != Pubkey::default(), UDAError::InvalidAddress);
-        require!(mint != Pubkey::default(), UDAError::InvalidMint);
-        require!(secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
+        require!(params.redeemer != Pubkey::default(), UDAError::InvalidAddress);
+        require!(params.secret_hash != [0u8; 32], UDAError::InvalidSecretHash);
 
-        let computed_hash = hash::hash(&destination_data).to_bytes();
+        let computed_hash = hash::hash(&params.destination_data).to_bytes();
         require!(
-            destination_hash == computed_hash,
+            params.destination_hash == computed_hash,
             UDAError::DestinationHashMismatchComputedHash
         );
 
         let uda = &mut ctx.accounts.uda;
-        require!(uda.key() != redeemer, UDAError::SameAddress);
-        require!(
-            ctx.accounts.mint_account.key() == mint,
-            UDAError::InvalidMint
-        );
+        require!(uda.key() != params.redeemer, UDAError::SameAddress);
 
-        uda.mint = mint;
-        uda.refund_address = refund_address;
-        uda.redeemer = redeemer;
-        uda.timelock = timelock;
-        uda.secret_hash = secret_hash;
-        uda.amount = amount;
+        uda.mint = ctx.accounts.mint_account.key();
+        uda.refund_address = params.refund_address;
+        uda.redeemer = params.redeemer;
+        uda.timelock = params.timelock;
+        uda.secret_hash = params.secret_hash;
+        uda.amount = params.amount;
         uda.vault_address = ctx.accounts.uda_token_vault.key();
-        uda.created_at = Clock::get()?.slot;
         uda.rent_sponsor = ctx.accounts.payer.key();
-        uda.destination_data = destination_data.clone();
-        uda.destination_hash = destination_hash;
+        uda.destination_data = params.destination_data.clone();
+        uda.destination_hash = params.destination_hash;
         uda.identity_pda_bump = ctx.bumps.identity_pda;
 
         emit!(SPLUDACreated {
@@ -425,7 +412,6 @@ pub struct SPLUDA {
     pub secret_hash: [u8; 32],
     pub amount: u64,
     pub vault_address: Pubkey,
-    pub created_at: u64, // Slot when UDA was created (0 = not created, >0 = created)
     pub rent_sponsor: Pubkey, // Who paid for UDA creation (gets rent back)
     #[max_len(1024)] // Large limit - user pays for storage
     pub destination_data: Vec<u8>, // Destination data for cross-chain/routing purposes
@@ -655,29 +641,34 @@ pub struct InstantRefund<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+// Structured instruction args for creating an SPL UDA. Using a single struct
+// prevents callers from accidentally passing parameters in the wrong order.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct CreateSPLUDAParams {
+    pub refund_address: Pubkey,
+    pub redeemer: Pubkey,
+    pub timelock: u64,
+    pub secret_hash: [u8; 32],
+    pub amount: u64,
+    pub destination_data: Vec<u8>,
+    pub destination_hash: [u8; 32],
+}
+
 #[derive(Accounts)]
-#[instruction(
-    mint: Pubkey,
-    refund_address: Pubkey,
-    redeemer: Pubkey,
-    timelock: u64,
-    secret_hash: [u8; 32],
-    amount: u64,
-    destination_hash: [u8; 32]
-)]
+#[instruction(params: CreateSPLUDAParams)]
 pub struct CreateSPLUDA<'info> {
     #[account(
         init,
         payer = payer,
         seeds = [
             b"spl_uda",
-            mint.as_ref(),
-            refund_address.as_ref(),
-            redeemer.as_ref(),
-            &secret_hash,
-            &amount.to_le_bytes(),
-            &timelock.to_le_bytes(),
-            &destination_hash
+            mint_account.key().as_ref(),
+            params.refund_address.as_ref(),
+            params.redeemer.as_ref(),
+            &params.secret_hash,
+            &params.amount.to_le_bytes(),
+            &params.timelock.to_le_bytes(),
+            &params.destination_hash
         ],
         bump,
         space = SPLUDA::INIT_SPACE,
@@ -692,7 +683,6 @@ pub struct CreateSPLUDA<'info> {
         payer = payer,
         seeds = [
             b"token_vault",
-            mint.key().as_ref(),
             uda.key().as_ref()
         ],
         bump,
