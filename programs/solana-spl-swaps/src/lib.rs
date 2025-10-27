@@ -288,10 +288,8 @@ pub mod solana_spl_swaps {
 
         emit!(SPLUDACreated {
             uda_address: uda.key(),
-            vault_address: ctx.accounts.uda_token_vault.key(),
-            refund_address: uda.refund_address,
-            amount: uda.amount,
-            timelock: uda.timelock,
+            uda: uda.clone().into_inner(),
+            
         });
 
         Ok(ctx.accounts.uda_token_vault.key())
@@ -839,10 +837,7 @@ pub struct InstantRefunded {
 #[event]
 pub struct SPLUDACreated {
     pub uda_address: Pubkey,
-    pub vault_address: Pubkey,
-    pub refund_address: Pubkey,
-    pub amount: u64,
-    pub timelock: u64,
+    pub uda: SPLUDA
 }
 
 #[event]
