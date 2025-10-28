@@ -73,6 +73,7 @@ pub mod solana_spl_swaps {
             secret_hash,
             swap_amount,
             destination_data,
+            funder: ctx.accounts.funder.key(),
         });
 
         Ok(())
@@ -465,6 +466,7 @@ pub struct Initiated {
     pub timelock: u64,
     /// Information regarding the destination chain in the atomic swap
     pub destination_data: Option<Vec<u8>>,
+    pub funder: Pubkey,
 }
 /// Represents the redeemed state of the swap, where the redeemer has withdrawn funds from the vault
 #[event]
